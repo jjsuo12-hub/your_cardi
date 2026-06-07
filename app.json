@@ -1,0 +1,12 @@
+{
+  "expo": {
+    "name": "HiCardi 체크리스트",
+    "slug": "yourcadi",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "platforms": ["ios", "android", "web"],
+    "web": {
+      "bundler": "metro"
+    }
+  }
+}
