@@ -1,3 +1,5 @@
+dist/
+web-build/
 node_modules/
 .expo/
 .expo-shared/
@@ -6,3 +8,15 @@ yarn-debug.log*
 yarn-error.log*
 .DS_Store
 *.local
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.jks
+*.keystore
+*.p8
+*.mobileprovision
+credentials.json
+serviceAccount*.json
+firebase-service-account*.json
