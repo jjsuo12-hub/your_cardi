@@ -25,7 +25,15 @@ import {
 } from './utils/generateDemoPatientVitals';
 
 type Tab = 'criteria' | 'patients' | 'setup' | 'manual' | 'qa';
-type TransplantType = 'kidney' | 'liver' | 'heart' | 'lung' | 'other';
+type DepartmentCategory =
+  | 'transplantVascularSurgery'
+  | 'pediatricSurgery'
+  | 'hepatobiliaryPancreaticSurgery'
+  | 'gastrointestinalSurgery'
+  | 'endocrineSurgery'
+  | 'icuTransferOther';
+type TransplantSubtype = 'liver' | 'kidney';
+type TransferSource = 'ward' | 'operatingRoom' | 'icu' | 'otherDepartmentIcu' | 'other';
 type PatientStatus = 'stable' | 'caution' | 'checkRequired';
 type SignalQuality = 'good' | 'weak' | 'poor';
 type HicardiIndication = 'icuTransfer' | 'kidneyTransplant' | 'liverTransplant';
@@ -50,23 +58,19 @@ type PatientAlertState = {
   suppressAlertUntil?: number;
 };
 
-const patientIndicationLabels: Record<HicardiIndication, string> = {
-  icuTransfer: '중환자실에서 이송',
-  kidneyTransplant: '신장이식',
-  liverTransplant: '간이식',
-};
-
 type Patient = {
   id: string;
   name: string;
   patientNumber?: string;
   indication?: HicardiIndication;
+  departmentCategory: DepartmentCategory;
+  transplantSubtype?: TransplantSubtype;
+  transferSource?: TransferSource;
   applicationReason?: string;
   memo?: string;
   targets: PatientTargets;
   room: string;
   bed?: string;
-  transplantType: TransplantType;
   pod?: number;
   hicardiStartTime?: string;
   status: PatientStatus;
@@ -112,11 +116,25 @@ const temporaryNotice =
 const demoNotice =
   'DEMO DATA: 본 화면은 실제 HiCardi 연동 화면이 아니며, 시연을 위한 가상 환자 생체정보입니다. 실제 환자 데이터 아님 / 실제 의료 판단용 아님.';
 
-const transplantLabels: Record<TransplantType, string> = {
-  kidney: '신장이식',
+const departmentCategoryLabels: Record<DepartmentCategory, string> = {
+  transplantVascularSurgery: '이식혈관외과',
+  pediatricSurgery: '소아외과',
+  hepatobiliaryPancreaticSurgery: '간담췌외과',
+  gastrointestinalSurgery: '위장관 외과',
+  endocrineSurgery: '내분비 외과',
+  icuTransferOther: '기타 / 타과 중환자실 전동',
+};
+
+const transplantSubtypeLabels: Record<TransplantSubtype, string> = {
   liver: '간이식',
-  heart: '심장이식',
-  lung: '폐이식',
+  kidney: '신장이식',
+};
+
+const transferSourceLabels: Record<TransferSource, string> = {
+  ward: '병동 입원',
+  operatingRoom: '수술실',
+  icu: '중환자실',
+  otherDepartmentIcu: '타과 중환자실',
   other: '기타',
 };
 
@@ -214,12 +232,14 @@ const initialPatients: Patient[] = [
     name: '김OO',
     patientNumber: 'P-240601',
     indication: 'kidneyTransplant',
+    departmentCategory: 'transplantVascularSurgery',
+    transplantSubtype: 'kidney',
+    transferSource: 'operatingRoom',
     applicationReason: '신장이식 후 시연용 관찰',
     memo: '시연용 가상 환자',
     targets: { ...defaultTargets },
     room: '601',
     bed: '1',
-    transplantType: 'kidney',
     pod: 2,
     hicardiStartTime: '오늘 08:20',
     status: 'stable',
@@ -232,12 +252,14 @@ const initialPatients: Patient[] = [
     name: '이OO',
     patientNumber: 'P-240602',
     indication: 'liverTransplant',
+    departmentCategory: 'transplantVascularSurgery',
+    transplantSubtype: 'liver',
+    transferSource: 'operatingRoom',
     applicationReason: '간이식 후 시연용 관찰',
     memo: '시연용 가상 환자',
     targets: { ...defaultTargets, hrMax: 110, spo2Min: 94 },
     room: '602',
     bed: '2',
-    transplantType: 'liver',
     pod: 1,
     hicardiStartTime: '오늘 10:05',
     status: 'stable',
@@ -250,12 +272,13 @@ const initialPatients: Patient[] = [
     name: '박OO',
     patientNumber: 'P-240603',
     indication: 'icuTransfer',
+    departmentCategory: 'icuTransferOther',
+    transferSource: 'icu',
     applicationReason: '중환자실 이송 후 시연용 관찰',
     memo: '시연용 가상 환자',
     targets: { ...defaultTargets, hrMax: 120 },
     room: '603',
     bed: '1',
-    transplantType: 'kidney',
     pod: 4,
     hicardiStartTime: '어제 21:40',
     status: 'stable',
@@ -272,11 +295,11 @@ const initialVitals: Record<string, VitalSign> = {
 };
 
 const demoPatientTemplates = [
-  { name: '김OO', patientNumber: 'P-240601', indication: 'kidneyTransplant' as HicardiIndication, applicationReason: '신장이식 후 시연용 관찰', targets: { ...defaultTargets }, room: '601', bed: '1', transplantType: 'kidney' as TransplantType, pod: 2 },
-  { name: '이OO', patientNumber: 'P-240602', indication: 'liverTransplant' as HicardiIndication, applicationReason: '간이식 후 시연용 관찰', targets: { ...defaultTargets, hrMax: 110, spo2Min: 94 }, room: '602', bed: '2', transplantType: 'liver' as TransplantType, pod: 1 },
-  { name: '박OO', patientNumber: 'P-240603', indication: 'icuTransfer' as HicardiIndication, applicationReason: '중환자실 이송 후 시연용 관찰', targets: { ...defaultTargets, hrMax: 120 }, room: '603', bed: '1', transplantType: 'kidney' as TransplantType, pod: 4 },
-  { name: '최OO', patientNumber: 'P-240604', indication: 'kidneyTransplant' as HicardiIndication, applicationReason: '신장이식 후 시연용 관찰', targets: { ...defaultTargets }, room: '604', bed: '2', transplantType: 'other' as TransplantType, pod: 3 },
-  { name: '정OO', patientNumber: 'P-240605', indication: 'liverTransplant' as HicardiIndication, applicationReason: '간이식 후 시연용 관찰', targets: { ...defaultTargets, spo2Min: 94 }, room: '605', bed: '1', transplantType: 'liver' as TransplantType, pod: 5 },
+  { name: '김OO', patientNumber: 'P-240601', indication: 'kidneyTransplant' as HicardiIndication, departmentCategory: 'transplantVascularSurgery' as DepartmentCategory, transplantSubtype: 'kidney' as TransplantSubtype, transferSource: 'operatingRoom' as TransferSource, applicationReason: '신장이식 후 시연용 관찰', targets: { ...defaultTargets }, room: '601', bed: '1', pod: 2 },
+  { name: '이OO', patientNumber: 'P-240602', indication: 'liverTransplant' as HicardiIndication, departmentCategory: 'transplantVascularSurgery' as DepartmentCategory, transplantSubtype: 'liver' as TransplantSubtype, transferSource: 'operatingRoom' as TransferSource, applicationReason: '간이식 후 시연용 관찰', targets: { ...defaultTargets, hrMax: 110, spo2Min: 94 }, room: '602', bed: '2', pod: 1 },
+  { name: '박OO', patientNumber: 'P-240603', indication: 'icuTransfer' as HicardiIndication, departmentCategory: 'icuTransferOther' as DepartmentCategory, transferSource: 'icu' as TransferSource, applicationReason: '중환자실 이송 후 시연용 관찰', targets: { ...defaultTargets, hrMax: 120 }, room: '603', bed: '1', pod: 4 },
+  { name: '최OO', patientNumber: 'P-240604', indication: 'icuTransfer' as HicardiIndication, departmentCategory: 'gastrointestinalSurgery' as DepartmentCategory, transferSource: 'ward' as TransferSource, applicationReason: '위장관 외과 수술 후 시연용 관찰', targets: { ...defaultTargets }, room: '604', bed: '2', pod: 3 },
+  { name: '정OO', patientNumber: 'P-240605', indication: 'icuTransfer' as HicardiIndication, departmentCategory: 'hepatobiliaryPancreaticSurgery' as DepartmentCategory, transferSource: 'operatingRoom' as TransferSource, applicationReason: '간담췌외과 수술 후 시연용 관찰', targets: { ...defaultTargets, spo2Min: 94 }, room: '605', bed: '1', pod: 5 },
 ];
 
 export default function App() {
@@ -303,7 +326,9 @@ export default function App() {
     tempId: 'DEMO-001',
     room: '601',
     bed: '1',
-    transplantType: 'kidney' as TransplantType,
+    departmentCategory: 'transplantVascularSurgery' as DepartmentCategory,
+    transplantSubtype: 'kidney' as TransplantSubtype,
+    transferSource: 'operatingRoom' as TransferSource,
     pod: '1',
     applicationReason: '시연용 적용 사유',
     memo: '시연용 가상 환자 메모',
@@ -373,13 +398,15 @@ export default function App() {
       id,
       name: patientForm.name || '가상 환자',
       patientNumber: patientForm.tempId || `DEMO-${Date.now()}`,
-      indication: getIndicationFromTransplant(patientForm.transplantType),
+      indication: getIndicationFromPatient(patientForm.departmentCategory, patientForm.transplantSubtype),
+      departmentCategory: patientForm.departmentCategory,
+      transplantSubtype: getTransplantSubtypeForSave(patientForm.departmentCategory, patientForm.transplantSubtype),
+      transferSource: patientForm.transferSource,
       applicationReason: patientForm.applicationReason,
       memo: patientForm.memo,
       targets: patientForm.targets,
       room: patientForm.room || '000',
       bed: patientForm.bed || '0',
-      transplantType: patientForm.transplantType,
       pod: Number(patientForm.pod) || 0,
       hicardiStartTime: new Date().toLocaleString('ko-KR', {
         month: '2-digit',
@@ -491,7 +518,9 @@ export default function App() {
       tempId: `DEMO-${Date.now()}`,
       room: '',
       bed: '',
-      transplantType: 'kidney',
+      departmentCategory: 'transplantVascularSurgery',
+      transplantSubtype: 'kidney',
+      transferSource: 'ward',
       pod: '',
       applicationReason: '',
       memo: '',
@@ -524,7 +553,9 @@ export default function App() {
       tempId: patient.patientNumber ?? patient.id,
       room: patient.room,
       bed: patient.bed ?? '',
-      transplantType: patient.transplantType,
+      departmentCategory: patient.departmentCategory,
+      transplantSubtype: patient.transplantSubtype ?? 'kidney',
+      transferSource: patient.transferSource ?? 'ward',
       pod: patient.pod === undefined ? '' : `${patient.pod}`,
       applicationReason: patient.applicationReason ?? '',
       memo: patient.memo ?? '',
@@ -542,12 +573,14 @@ export default function App() {
                 ...patient,
                 name: patientForm.name || '가상 환자',
                 patientNumber: patientForm.tempId || patient.patientNumber,
-                indication: getIndicationFromTransplant(patientForm.transplantType),
+                indication: getIndicationFromPatient(patientForm.departmentCategory, patientForm.transplantSubtype),
+                departmentCategory: patientForm.departmentCategory,
+                transplantSubtype: getTransplantSubtypeForSave(patientForm.departmentCategory, patientForm.transplantSubtype),
+                transferSource: patientForm.transferSource,
                 applicationReason: patientForm.applicationReason,
                 memo: patientForm.memo,
                 room: patientForm.room || '000',
                 bed: patientForm.bed,
-                transplantType: patientForm.transplantType,
                 pod: Number(patientForm.pod) || 0,
                 targets,
               }
@@ -563,13 +596,15 @@ export default function App() {
       id,
       name: patientForm.name || '가상 환자',
       patientNumber: patientForm.tempId || `DEMO-${Date.now()}`,
-      indication: getIndicationFromTransplant(patientForm.transplantType),
+      indication: getIndicationFromPatient(patientForm.departmentCategory, patientForm.transplantSubtype),
+      departmentCategory: patientForm.departmentCategory,
+      transplantSubtype: getTransplantSubtypeForSave(patientForm.departmentCategory, patientForm.transplantSubtype),
+      transferSource: patientForm.transferSource,
       applicationReason: patientForm.applicationReason,
       memo: patientForm.memo,
       targets,
       room: patientForm.room || '000',
       bed: patientForm.bed,
-      transplantType: patientForm.transplantType,
       pod: Number(patientForm.pod) || 0,
       hicardiStartTime: new Date().toLocaleString('ko-KR', {
         month: '2-digit',
@@ -688,7 +723,9 @@ function CriteriaScreen({
     tempId: string;
     room: string;
     bed: string;
-    transplantType: TransplantType;
+    departmentCategory: DepartmentCategory;
+    transplantSubtype: TransplantSubtype;
+    transferSource: TransferSource;
     pod: string;
     applicationReason: string;
     memo: string;
@@ -703,6 +740,7 @@ function CriteriaScreen({
   goSetup: () => void;
 }) {
   const checkedLabels = checklistItems.filter(([id]) => checkedItems.includes(id)).map(([, label]) => label);
+  const isTransplantVascularSurgery = patientForm.departmentCategory === 'transplantVascularSurgery';
   const summary = `${patientForm.name || 'OOO'} 환자는 현재 HiCardi 체크리스트 임시 점수 ${totalScore}점으로, ${decision.title} 범위에 해당합니다. 체크된 주요 사유는 ${
     checkedLabels.length ? checkedLabels.join(', ') : '없음'
   }입니다. 단, 본 결과는 임시 기준에 따른 것으로 실제 적용 여부는 병동 프로토콜과 의료진 판단에 따라 결정해야 합니다.`;
@@ -718,11 +756,36 @@ function CriteriaScreen({
           <Field label="침상" value={patientForm.bed} onChangeText={(bed) => setPatientForm((p) => ({ ...p, bed }))} />
           <Field label="POD" value={patientForm.pod} onChangeText={(pod) => setPatientForm((p) => ({ ...p, pod }))} keyboardType="numeric" />
         </View>
-        <Text style={styles.label}>이식 종류</Text>
+        <Text style={styles.label}>진료과/환자 대분류</Text>
         <Segmented
-          value={patientForm.transplantType}
-          options={Object.entries(transplantLabels).map(([value, label]) => ({ value, label }))}
-          onChange={(transplantType) => setPatientForm((p) => ({ ...p, transplantType: transplantType as TransplantType }))}
+          value={patientForm.departmentCategory}
+          options={Object.entries(departmentCategoryLabels).map(([value, label]) => ({ value, label }))}
+          onChange={(departmentCategory) =>
+            setPatientForm((p) => ({
+              ...p,
+              departmentCategory: departmentCategory as DepartmentCategory,
+              transplantSubtype:
+                departmentCategory === 'transplantVascularSurgery' ? p.transplantSubtype : 'kidney',
+            }))
+          }
+        />
+        {isTransplantVascularSurgery ? (
+          <>
+            <Text style={styles.label}>이식혈관외과 세부 항목</Text>
+            <Segmented
+              value={patientForm.transplantSubtype}
+              options={Object.entries(transplantSubtypeLabels).map(([value, label]) => ({ value, label }))}
+              onChange={(transplantSubtype) => setPatientForm((p) => ({ ...p, transplantSubtype: transplantSubtype as TransplantSubtype }))}
+            />
+          </>
+        ) : (
+          <Text style={styles.helperText}>이식혈관외과가 아닌 환자는 이식 세부 항목 없이 수술/질환 내용과 적용 사유를 아래에 기록하세요.</Text>
+        )}
+        <Text style={styles.label}>전동 출처</Text>
+        <Segmented
+          value={patientForm.transferSource}
+          options={Object.entries(transferSourceLabels).map(([value, label]) => ({ value, label }))}
+          onChange={(transferSource) => setPatientForm((p) => ({ ...p, transferSource: transferSource as TransferSource }))}
         />
         <Field label="적용 사유" value={patientForm.applicationReason} onChangeText={(applicationReason) => setPatientForm((p) => ({ ...p, applicationReason }))} multiline />
         <Field label="메모" value={patientForm.memo} onChangeText={(memo) => setPatientForm((p) => ({ ...p, memo }))} multiline />
@@ -750,7 +813,7 @@ function CriteriaScreen({
               {patient.bed ? `-${patient.bed}` : ''}
             </Text>
             <Text style={styles.cardText}>
-              {transplantLabels[patient.transplantType]} · POD {patient.pod ?? '-'} · 시연용 더미 데이터
+              {getPatientCategorySummary(patient)} · POD {patient.pod ?? '-'} · 전동 출처: {patient.transferSource ? transferSourceLabels[patient.transferSource] : '-'} · 시연용 더미 데이터
             </Text>
           </Pressable>
         ))}
@@ -890,7 +953,9 @@ function PatientsScreen({
                       )}
                     </View>
                     <Text style={styles.slotMeta}>환자번호: {patient.patientNumber ?? patient.id}</Text>
-                    <Text style={styles.slotMeta}>적용 사유: {patient.applicationReason || (patient.indication ? patientIndicationLabels[patient.indication] : '시연용 등록')}</Text>
+                    <Text style={styles.slotMeta}>대분류: {getPatientCategorySummary(patient)}</Text>
+                    <Text style={styles.slotMeta}>전동 출처: {patient.transferSource ? transferSourceLabels[patient.transferSource] : '-'}</Text>
+                    <Text style={styles.slotMeta}>적용 사유: {patient.applicationReason || '시연용 등록'}</Text>
                     <Text style={styles.slotMeta}>
                       병실: {patient.room}{patient.bed ? `-${patient.bed}` : ''} · 상태: {hasAnomaly && isAcknowledged ? 'Acknowledged demo' : statusLabels[patient.status]}
                     </Text>
@@ -944,7 +1009,7 @@ function PatientsScreen({
                   <PatientVitalsScreen
                     patientName={patient.name}
                     roomBed={`${patient.room}${patient.bed ? `-${patient.bed}` : ''}`}
-                    reason={patient.applicationReason || (patient.indication ? patientIndicationLabels[patient.indication] : '시연용 등록')}
+                    reason={patient.applicationReason || getPatientCategorySummary(patient)}
                   />
                 </View>
               )}
@@ -1482,10 +1547,23 @@ function getDecision(totalScore: number) {
   };
 }
 
-function getIndicationFromTransplant(transplantType: TransplantType): HicardiIndication {
-  if (transplantType === 'kidney') return 'kidneyTransplant';
-  if (transplantType === 'liver') return 'liverTransplant';
+function getIndicationFromPatient(departmentCategory: DepartmentCategory, transplantSubtype?: TransplantSubtype): HicardiIndication {
+  if (departmentCategory !== 'transplantVascularSurgery') return 'icuTransfer';
+  if (transplantSubtype === 'kidney') return 'kidneyTransplant';
+  if (transplantSubtype === 'liver') return 'liverTransplant';
   return 'icuTransfer';
+}
+
+function getTransplantSubtypeForSave(departmentCategory: DepartmentCategory, transplantSubtype?: TransplantSubtype) {
+  return departmentCategory === 'transplantVascularSurgery' ? transplantSubtype ?? 'kidney' : undefined;
+}
+
+function getPatientCategorySummary(patient: Patient) {
+  const category = departmentCategoryLabels[patient.departmentCategory];
+  if (patient.departmentCategory === 'transplantVascularSurgery' && patient.transplantSubtype) {
+    return `${category} · ${transplantSubtypeLabels[patient.transplantSubtype]}`;
+  }
+  return category;
 }
 
 function getDemoAnomalyMetrics(vital: VitalSign, targets: PatientTargets = defaultTargets): VitalMetricName[] {
