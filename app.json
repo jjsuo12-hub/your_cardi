@@ -1,12 +1,14 @@
 {
   "expo": {
-    "name": "HiCardi 체크리스트",
+    "name": "HiCardi 적용 기준 체크리스트",
     "slug": "yourcadi",
     "version": "1.0.0",
     "orientation": "portrait",
+    "icon": "./assets/icons/appstore.png",
     "platforms": ["ios", "android", "web"],
     "web": {
-      "bundler": "metro"
+      "bundler": "metro",
+      "favicon": "./assets/icons/appstore.png"
     }
   }
 }

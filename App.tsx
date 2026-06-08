@@ -27,6 +27,7 @@ import {
 type Tab = 'criteria' | 'patients' | 'setup' | 'manual' | 'qa';
 type DepartmentCategory =
   | 'transplantVascularSurgery'
+  | 'colorectalSurgery'
   | 'pediatricSurgery'
   | 'hepatobiliaryPancreaticSurgery'
   | 'gastrointestinalSurgery'
@@ -118,12 +119,15 @@ const demoNotice =
 
 const departmentCategoryLabels: Record<DepartmentCategory, string> = {
   transplantVascularSurgery: '이식혈관외과',
+  colorectalSurgery: '대장항문외과',
   pediatricSurgery: '소아외과',
   hepatobiliaryPancreaticSurgery: '간담췌외과',
   gastrointestinalSurgery: '위장관 외과',
   endocrineSurgery: '내분비 외과',
   icuTransferOther: '기타 / 타과 중환자실 전동',
 };
+
+const alertMetricNames: VitalMetricName[] = ['HR', 'SpO2'];
 
 const transplantSubtypeLabels: Record<TransplantSubtype, string> = {
   liver: '간이식',
@@ -304,7 +308,7 @@ const demoPatientTemplates = [
 
 export default function App() {
   const [fontsLoaded] = useFonts(customFontAssets);
-  const [tab, setTab] = useState<Tab>('criteria');
+  const [tab, setTab] = useState<Tab>('patients');
   const [patients, setPatients] = useState(initialPatients);
   const [selectedPatientId, setSelectedPatientId] = useState('p1');
   const [vitals, setVitals] = useState(initialVitals);
@@ -317,6 +321,7 @@ export default function App() {
   const [checkedItems, setCheckedItems] = useState<string[]>([]);
   const [setupDone, setSetupDone] = useState<string[]>([]);
   const [manualSearch, setManualSearch] = useState('');
+  const [manualSearchHistory, setManualSearchHistory] = useState<string[]>([]);
   const [qaSearch, setQaSearch] = useState('');
   const [manualDetail, setManualDetail] = useState<string | null>(null);
   const [qaDetail, setQaDetail] = useState<string | null>(null);
@@ -348,7 +353,7 @@ export default function App() {
       isDemoAnomalyMode &&
       Object.values(vitals).some((vital) => {
         const patient = patients.find((item) => item.id === vital.patientId);
-        const anomalyMetrics = getDemoAnomalyMetrics(vital, patient?.targets);
+        const anomalyMetrics = getAlertMetrics(vital, patient?.targets);
         const alertState = patientAlertStates[vital.patientId];
         const shouldShowBlinkingAlert =
           anomalyMetrics.length > 0 && (!alertState?.suppressAlertUntil || Date.now() > alertState.suppressAlertUntil);
@@ -390,6 +395,12 @@ export default function App() {
   );
   const decision = getDecision(totalScore);
   const selectedPatient = patients.find((patient) => patient.id === selectedPatientId) ?? patients[0];
+
+  const saveManualSearch = (value: string) => {
+    const normalized = value.trim();
+    if (!normalized) return;
+    setManualSearchHistory((current) => [normalized, ...current.filter((item) => item.toLowerCase() !== normalized.toLowerCase())].slice(0, 5));
+  };
 
   const addSetupPatient = () => {
     if (setupDone.length !== setupSteps.length) return;
@@ -537,8 +548,8 @@ export default function App() {
       ...current,
       [patientId]: {
         patientId,
-        hasAnomaly: Boolean(vital && getDemoAnomalyMetrics(vital, patient?.targets).length > 0),
-        anomalyMetrics: vital ? getDemoAnomalyMetrics(vital, patient?.targets) : [],
+        hasAnomaly: Boolean(vital && getAlertMetrics(vital, patient?.targets).length > 0),
+        anomalyMetrics: vital ? getAlertMetrics(vital, patient?.targets) : [],
         isAcknowledged: true,
         acknowledgedAt: now,
         suppressAlertUntil: now + 10 * 60 * 1000,
@@ -686,6 +697,8 @@ export default function App() {
             <ManualScreen
               search={manualSearch}
               setSearch={setManualSearch}
+              saveSearch={saveManualSearch}
+              searchHistory={manualSearchHistory}
               detail={manualDetail}
               setDetail={setManualDetail}
               favorites={favorites}
@@ -904,8 +917,9 @@ function PatientsScreen({
         {slots.map((patient, index) => {
           const selected = patient?.id === expandedPatientId;
           const vital = patient ? vitals[patient.id] : undefined;
-          const anomalyMetrics = isDemoAnomalyMode && vital ? getDemoAnomalyMetrics(vital, patient?.targets) : [];
-          const hasAnomaly = Boolean(patient && anomalyMetrics.length > 0);
+          const abnormalMetrics = vital ? getDemoAnomalyMetrics(vital, patient?.targets) : [];
+          const alertMetrics = isDemoAnomalyMode && vital ? getAlertMetrics(vital, patient?.targets) : [];
+          const hasAnomaly = Boolean(patient && alertMetrics.length > 0);
           const alertState = patient ? patientAlertStates[patient.id] : undefined;
           const isSuppressed = Boolean(alertState?.suppressAlertUntil && Date.now() <= alertState.suppressAlertUntil);
           const isAcknowledged = Boolean(alertState?.isAcknowledged && isSuppressed);
@@ -960,7 +974,10 @@ function PatientsScreen({
                       병실: {patient.room}{patient.bed ? `-${patient.bed}` : ''} · 상태: {hasAnomaly && isAcknowledged ? 'Acknowledged demo' : statusLabels[patient.status]}
                     </Text>
                     {hasAnomaly && shouldShowBlinkingAlert && (
-                      <Text style={styles.anomalyMetricSummary}>데모 이상 항목: {anomalyMetrics.join(', ')}</Text>
+                      <Text style={styles.anomalyMetricSummary}>데모 알림 항목: {alertMetrics.join(', ')}</Text>
+                    )}
+                    {!hasAnomaly && abnormalMetrics.length > 0 && (
+                      <Text style={styles.referenceMetricSummary}>참고 이상 수치: {abnormalMetrics.join(', ')} · 경고 배지는 띄우지 않습니다.</Text>
                     )}
                   </View>
                 ) : (
@@ -976,10 +993,10 @@ function PatientsScreen({
                   <Text style={styles.expandedTitle}>생체정보 상세</Text>
                   <Text style={styles.sectionCaption}>선택 환자: {patient.name} / 시연용 임시 기준으로 표시됩니다.</Text>
                   <View style={styles.metricGrid}>
-                    <VitalMetricCard label="HR" value={`${vital.hr}`} unit="bpm" abnormal={anomalyMetrics.includes('HR')} acknowledged={isAcknowledged} blink={shouldBlink} showAlert={shouldShowBlinkingAlert} />
-                    <VitalMetricCard label="SpO2" value={`${vital.spo2}`} unit="%" abnormal={anomalyMetrics.includes('SpO2')} acknowledged={isAcknowledged} blink={shouldBlink} showAlert={shouldShowBlinkingAlert} />
-                    <VitalMetricCard label="RR" value={`${vital.rr}`} unit="breaths/min" abnormal={anomalyMetrics.includes('RR')} acknowledged={isAcknowledged} blink={shouldBlink} showAlert={shouldShowBlinkingAlert} />
-                    <VitalMetricCard label="SkinTemp" displayLabel="Skin Temp" value={vital.temperature.toFixed(1)} unit="°C" abnormal={anomalyMetrics.includes('SkinTemp')} acknowledged={isAcknowledged} blink={shouldBlink} showAlert={shouldShowBlinkingAlert} />
+                    <VitalMetricCard label="HR" value={`${vital.hr}`} unit="bpm" abnormal={abnormalMetrics.includes('HR')} acknowledged={isAcknowledged} blink={shouldBlink} showAlert={shouldShowBlinkingAlert && alertMetrics.includes('HR')} />
+                    <VitalMetricCard label="SpO2" value={`${vital.spo2}`} unit="%" abnormal={abnormalMetrics.includes('SpO2')} acknowledged={isAcknowledged} blink={shouldBlink} showAlert={shouldShowBlinkingAlert && alertMetrics.includes('SpO2')} />
+                    <VitalMetricCard label="RR" value={`${vital.rr}`} unit="breaths/min" abnormal={abnormalMetrics.includes('RR')} acknowledged={false} blink={false} showAlert={false} />
+                    <VitalMetricCard label="SkinTemp" displayLabel="Skin Temp" value={vital.temperature.toFixed(1)} unit="°C" abnormal={abnormalMetrics.includes('SkinTemp')} acknowledged={false} blink={false} showAlert={false} />
                   </View>
                   {hasAnomaly && (shouldShowBlinkingAlert || isAcknowledged) && (
                     <View style={styles.acknowledgePanel}>
@@ -997,12 +1014,12 @@ function PatientsScreen({
                   )}
                   <Notice
                     title="시연용 임시 상태 로직"
-                    text="생체정보 기록은 5분마다 실시하는 것으로 가정합니다. 이상 수치 판정은 환자등록 화면의 환자별 Target 값을 우선 사용합니다. 실제 임상 기준이 아닙니다."
+                    text="생체정보 기록은 5분마다 실시하는 것으로 가정합니다. HR, SpO2는 환자등록 화면의 환자별 Target 값을 우선 사용하고, RR·Skin Temp는 참고용 이상 표시만 남깁니다. 실제 임상 기준이 아닙니다."
                     tone="warning"
                   />
                   <View style={styles.targetSummary}>
                     <Text style={styles.targetSummaryText}>
-                      Target 예시: HR {patient.targets.hrMin}-{patient.targets.hrMax} bpm · SpO2 {patient.targets.spo2Min}-{patient.targets.spo2Max}% · RR {patient.targets.rrMin}-{patient.targets.rrMax} · Skin Temp {patient.targets.skinTempMin}-{patient.targets.skinTempMax}℃
+                      알림 Target 예시: HR {patient.targets.hrMin}-{patient.targets.hrMax} bpm · SpO2 {patient.targets.spo2Min}-{patient.targets.spo2Max}% / RR, Skin Temp는 참고 수치만 빨간색으로 표시합니다.
                     </Text>
                   </View>
                   <VitalSignsHistoryChart />
@@ -1107,11 +1124,8 @@ function PatientTargetFields({
         <Field label="HR max (bpm)" value={`${targets.hrMax}`} onChangeText={(value) => updateNumber('hrMax', value)} keyboardType="numeric" />
         <Field label="SpO2 min (%)" value={`${targets.spo2Min}`} onChangeText={(value) => updateNumber('spo2Min', value)} keyboardType="numeric" />
         <Field label="SpO2 max (%)" value={`${targets.spo2Max}`} onChangeText={(value) => updateNumber('spo2Max', value)} keyboardType="numeric" />
-        <Field label="RR min (breaths/min)" value={`${targets.rrMin}`} onChangeText={(value) => updateNumber('rrMin', value)} keyboardType="numeric" />
-        <Field label="RR max (breaths/min)" value={`${targets.rrMax}`} onChangeText={(value) => updateNumber('rrMax', value)} keyboardType="numeric" />
-        <Field label="Skin Temperature min (℃)" value={`${targets.skinTempMin}`} onChangeText={(value) => updateNumber('skinTempMin', value)} keyboardType="numeric" />
-        <Field label="Skin Temperature max (℃)" value={`${targets.skinTempMax}`} onChangeText={(value) => updateNumber('skinTempMax', value)} keyboardType="numeric" />
       </View>
+      <Text style={styles.targetCaption}>RR, Skin Temperature는 신뢰성이 낮아 환자 상태 확인 알림 기준에서는 제외했습니다. 수치 카드와 그래프의 참고 표시는 유지됩니다.</Text>
     </View>
   );
 }
@@ -1119,6 +1133,8 @@ function PatientTargetFields({
 function ManualScreen({
   search,
   setSearch,
+  saveSearch,
+  searchHistory,
   detail,
   setDetail,
   favorites,
@@ -1126,6 +1142,8 @@ function ManualScreen({
 }: {
   search: string;
   setSearch: (value: string) => void;
+  saveSearch: (value: string) => void;
+  searchHistory: string[];
   detail: string | null;
   setDetail: (value: string | null) => void;
   favorites: string[];
@@ -1138,7 +1156,32 @@ function ManualScreen({
     <View style={styles.screen}>
       <Notice title="간단 매뉴얼 임시안" text={`${temporaryNotice} 제조사 지침과 병동 프로토콜을 우선 확인해야 합니다.`} tone="warning" />
       <Section title="매뉴얼 검색">
-        <Field label="검색어" value={search} onChangeText={setSearch} placeholder="연결, 배터리, 알람, EKG, 패치, 종료" />
+        <Field
+          label="검색어"
+          value={search}
+          onChangeText={setSearch}
+          onBlur={() => saveSearch(search)}
+          placeholder="연결, 배터리, 알람, EKG, 패치, 종료"
+        />
+        {searchHistory.length > 0 && (
+          <View style={styles.searchHistoryWrap}>
+            <Text style={styles.searchHistoryLabel}>이전 검색어 5개</Text>
+            <View style={styles.searchHistoryRow}>
+              {searchHistory.map((item) => (
+                <Pressable
+                  key={item}
+                  style={styles.searchHistoryChip}
+                  onPress={() => {
+                    setSearch(item);
+                    saveSearch(item);
+                  }}
+                >
+                  <Text style={styles.searchHistoryChipText}>{item}</Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+        )}
       </Section>
       {detail ? (
         <Section title="매뉴얼 상세">
@@ -1153,7 +1196,13 @@ function ManualScreen({
             const favorite = favorites.includes(item);
             return (
               <View key={item} style={styles.manualCard}>
-                <Pressable style={styles.flex} onPress={() => setDetail(item)}>
+                <Pressable
+                  style={styles.flex}
+                  onPress={() => {
+                    saveSearch(search);
+                    setDetail(item);
+                  }}
+                >
                   <Text style={styles.cardTitle}>{item}</Text>
                   <Text style={styles.cardText}>짧은 단계형 임시 안내를 확인합니다.</Text>
                   <Badge text="임시 매뉴얼 / 추후 확정 예정" />
@@ -1239,6 +1288,65 @@ function Detail({ title, warning }: { title: string; warning?: string }) {
   );
 }
 
+function TabIcon({ tab, active }: { tab: Tab; active: boolean }) {
+  const color = active ? '#FFFFFF' : theme.primary;
+
+  if (tab === 'criteria') {
+    return (
+      <Svg width="24" height="24" viewBox="0 0 24 24">
+        <Rect x="5" y="4" width="14" height="16" rx="2" stroke={color} strokeWidth="2" fill="none" />
+        <Line x1="8" y1="9" x2="16" y2="9" stroke={color} strokeWidth="2" strokeLinecap="round" />
+        <Line x1="8" y1="13" x2="13" y2="13" stroke={color} strokeWidth="2" strokeLinecap="round" />
+        <Path d="M8 16.2 9.8 18 13.5 14.4" stroke={color} strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+      </Svg>
+    );
+  }
+
+  if (tab === 'patients') {
+    return (
+      <Svg width="24" height="24" viewBox="0 0 24 24">
+        <Rect x="4" y="5" width="16" height="14" rx="3" stroke={color} strokeWidth="2" fill="none" />
+        <Path d="M8 15v-2.5a2.5 2.5 0 0 1 5 0V15" stroke={color} strokeWidth="2" fill="none" strokeLinecap="round" />
+        <Circle cx="10.5" cy="9.5" r="1.7" fill={color} />
+        <Line x1="15.5" y1="9" x2="18" y2="9" stroke={color} strokeWidth="2" strokeLinecap="round" />
+        <Line x1="15.5" y1="12.5" x2="18" y2="12.5" stroke={color} strokeWidth="2" strokeLinecap="round" />
+      </Svg>
+    );
+  }
+
+  if (tab === 'setup') {
+    return (
+      <Svg width="24" height="24" viewBox="0 0 24 24">
+        <Circle cx="12" cy="12" r="3" stroke={color} strokeWidth="2" fill="none" />
+        <Path
+          d="M12 4.5v2.2M12 17.3v2.2M19.5 12h-2.2M6.7 12H4.5M17.3 6.7l-1.6 1.6M8.3 15.7l-1.6 1.6M17.3 17.3l-1.6-1.6M8.3 8.3 6.7 6.7"
+          stroke={color}
+          strokeWidth="2"
+          fill="none"
+          strokeLinecap="round"
+        />
+      </Svg>
+    );
+  }
+
+  if (tab === 'manual') {
+    return (
+      <Svg width="24" height="24" viewBox="0 0 24 24">
+        <Path d="M6 5.5h6.5a3 3 0 0 1 3 3V18H9a3 3 0 0 0-3 3Z" stroke={color} strokeWidth="2" fill="none" strokeLinejoin="round" />
+        <Path d="M18 5.5h-5.5a3 3 0 0 0-3 3V18H15a3 3 0 0 1 3 3Z" stroke={color} strokeWidth="2" fill="none" strokeLinejoin="round" />
+      </Svg>
+    );
+  }
+
+  return (
+    <Svg width="24" height="24" viewBox="0 0 24 24">
+      <Circle cx="12" cy="7.5" r="2" stroke={color} strokeWidth="2" fill="none" />
+      <Path d="M6 18c1.4-3 4-4.5 6-4.5S16.6 15 18 18" stroke={color} strokeWidth="2" fill="none" strokeLinecap="round" />
+      <Path d="M18 9.5h2M21 9.5h-2M19.5 8v3" stroke={color} strokeWidth="2" fill="none" strokeLinecap="round" />
+    </Svg>
+  );
+}
+
 function BottomTabs({ active, setActive }: { active: Tab; setActive: (tab: Tab) => void }) {
   const tabs: { id: Tab; label: string }[] = [
     { id: 'criteria', label: '환자등록' },
@@ -1251,7 +1359,10 @@ function BottomTabs({ active, setActive }: { active: Tab; setActive: (tab: Tab) 
     <View style={styles.tabBar}>
       {tabs.map((item) => (
         <Pressable key={item.id} style={[styles.tabButton, active === item.id && styles.tabButtonActive]} onPress={() => setActive(item.id)}>
-          <Text style={[styles.tabText, active === item.id && styles.tabTextActive]}>{item.label}</Text>
+          <View style={styles.tabInner}>
+            <TabIcon tab={item.id} active={active === item.id} />
+            <Text style={[styles.tabText, active === item.id && styles.tabTextActive]}>{item.label}</Text>
+          </View>
         </Pressable>
       ))}
     </View>
@@ -1262,6 +1373,7 @@ function Field({
   label,
   value,
   onChangeText,
+  onBlur,
   placeholder,
   multiline,
   keyboardType,
@@ -1269,6 +1381,7 @@ function Field({
   label: string;
   value: string;
   onChangeText: (value: string) => void;
+  onBlur?: () => void;
   placeholder?: string;
   multiline?: boolean;
   keyboardType?: 'default' | 'numeric';
@@ -1280,6 +1393,7 @@ function Field({
         style={[styles.input, multiline && styles.multilineInput]}
         value={value}
         onChangeText={onChangeText}
+        onBlur={onBlur}
         placeholder={placeholder}
         placeholderTextColor="#7B8A96"
         multiline={multiline}
@@ -1576,6 +1690,10 @@ function getDemoAnomalyMetrics(vital: VitalSign, targets: PatientTargets = defau
   return metrics;
 }
 
+function getAlertMetrics(vital: VitalSign, targets: PatientTargets = defaultTargets): VitalMetricName[] {
+  return getDemoAnomalyMetrics(vital, targets).filter((metric) => alertMetricNames.includes(metric));
+}
+
 function normalizeTargets(targets?: PatientTargets): PatientTargets {
   return {
     ...defaultTargets,
@@ -1679,8 +1797,10 @@ const styles = StyleSheet.create({
   },
   header: {
     paddingHorizontal: 18,
-    paddingTop: 14,
-    paddingBottom: 12,
+    paddingTop: 8,
+    paddingBottom: 8,
+    minHeight: 54,
+    justifyContent: 'center',
     backgroundColor: theme.primary,
   },
   headerTitle: {
@@ -2068,6 +2188,12 @@ const styles = StyleSheet.create({
     color: '#B42318',
     fontSize: 13,
     fontWeight: '900',
+    marginTop: 3,
+  },
+  referenceMetricSummary: {
+    color: theme.caution,
+    fontSize: 13,
+    fontWeight: '800',
     marginTop: 3,
   },
   emptySlotInner: {
@@ -2476,6 +2602,32 @@ const styles = StyleSheet.create({
     backgroundColor: theme.card,
     padding: 12,
   },
+  searchHistoryWrap: {
+    gap: 8,
+  },
+  searchHistoryLabel: {
+    color: theme.muted,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  searchHistoryRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  searchHistoryChip: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#B8D3E5',
+    backgroundColor: theme.primarySoft,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  searchHistoryChipText: {
+    color: theme.primary,
+    fontSize: 12,
+    fontWeight: '800',
+  },
   favoriteButton: {
     width: 42,
     height: 42,
@@ -2540,6 +2692,7 @@ const styles = StyleSheet.create({
     backgroundColor: theme.card,
     borderTopWidth: 1,
     borderTopColor: theme.border,
+    minHeight: 72,
   },
   tabButton: {
     flex: 1,
@@ -2548,15 +2701,22 @@ const styles = StyleSheet.create({
     minHeight: 52,
     borderRadius: 8,
     paddingHorizontal: 4,
+    paddingVertical: 6,
+  },
+  tabInner: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
   },
   tabButtonActive: {
     backgroundColor: theme.primary,
   },
   tabText: {
     color: theme.muted,
-    fontSize: 12,
+    fontSize: 10,
     fontWeight: '800',
     textAlign: 'center',
+    lineHeight: 12,
   },
   tabTextActive: {
     color: '#FFFFFF',
