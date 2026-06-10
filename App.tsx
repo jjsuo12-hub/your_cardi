@@ -1152,7 +1152,7 @@ function PatientsScreen({
                     >
                       <View style={styles.detailFlatHeader}>
                         <Text style={styles.detailFlatTitle}>{getPatientDetailTabLabel(activePatientDetailTab)}</Text>
-                        <Text style={styles.detailFlatHint}>다시 터치하면 닫힘</Text>
+                        <Text style={styles.detailFlatHint}>다시 터치하여 접기</Text>
                       </View>
                       <Pressable style={styles.detailFlatBody} onPress={(event) => event.stopPropagation?.()}>
                         {activePatientDetailTab === 'ecg' ? (
@@ -1770,9 +1770,18 @@ function AccordionCard({
           </View>
           {summary ? <Text style={styles.accordionSummary}>{summary}</Text> : null}
         </View>
-        <Text style={styles.manualAccordionChevron}>{expanded ? '⌃' : '⌄'}</Text>
+        <View style={styles.accordionRight}>
+          {expanded ? <Text style={styles.accordionCollapseHint}>다시 터치하여 접기</Text> : null}
+          <Text style={styles.manualAccordionChevron}>{expanded ? '⌃' : '⌄'}</Text>
+        </View>
       </Pressable>
-      {expanded ? <View style={styles.accordionBody}>{children}</View> : null}
+      {expanded ? (
+        <Pressable style={styles.accordionBody} onPress={handleToggle}>
+          <Pressable style={styles.accordionBodyInner} onPress={(event) => event.stopPropagation?.()}>
+            {children}
+          </Pressable>
+        </Pressable>
+      ) : null}
     </View>
   );
 }
@@ -2519,6 +2528,17 @@ const styles = StyleSheet.create({
     gap: 12,
     padding: 16,
   },
+  accordionRight: {
+    alignItems: 'flex-end',
+    gap: 4,
+  },
+  accordionCollapseHint: {
+    color: theme.muted,
+    fontSize: 11,
+    lineHeight: 16,
+    fontWeight: '700',
+    textAlign: 'right',
+  },
   accordionTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2548,6 +2568,8 @@ const styles = StyleSheet.create({
   accordionBody: {
     paddingHorizontal: 16,
     paddingBottom: 16,
+  },
+  accordionBodyInner: {
     gap: 12,
   },
   stepProgressWrap: {
