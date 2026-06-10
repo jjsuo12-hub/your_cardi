@@ -1,6 +1,9 @@
 ﻿import React, { useEffect, useMemo, useState } from 'react';
 import {
   AccessibilityInfo,
+  Image,
+  LayoutAnimation,
+  Modal,
   Platform,
   Pressable,
   SafeAreaView,
@@ -8,14 +11,40 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  UIManager,
   View,
 } from 'react-native';
 import Svg, { Circle, Line, Path, Polyline, Rect, Text as SvgText } from 'react-native-svg';
 import { useFonts } from 'expo-font';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { DemoAnomalyToggle } from './components/DemoAnomalyToggle';
 import { PatientVitalsScreen } from './screens/PatientVitalsScreen';
 import { VitalSignsHistoryChart } from './components/VitalSignsHistoryChart';
+import { CURRENT_DATA_SOURCE_LABEL, emrRepository } from './api/emr/emrRepository';
+import {
+  createPatientVitalSnapshot,
+  getDemoVitalsSnapshotMap,
+  getDemoWardPatientTemplatesSnapshot,
+  getDemoWardPatientsSnapshot,
+  searchDemoEmrPatientByNumber,
+} from './api/emr/demoEmrClient';
+import { demoHicardiClient } from './api/hicardi/demoHicardiClient';
+import { faqItems } from './data/faqData';
+import { manualSteps, ManualStepSection, ManualTabContent } from './data/manualData';
+import { manualImageAssets, ManualImageKey } from './data/manualImageAssets';
+import { defaultTargets } from './data/demoWardPatients';
+import { mapVitalSnapshotToNews2Input } from './mappers/emrMapper';
+import { mapAssessmentToHicardiMonitoringOrder, mapRawHicardiPayloadToVitalSnapshot } from './mappers/hicardiMapper';
+import {
+  AppPatient,
+  HicardiAssessmentRecord,
+  HicardiSpecialCriteria,
+  News2Band,
+  News2Input,
+  News2Result,
+  VitalSnapshot,
+} from './types/appClinicalTypes';
 import {
   DemoAnomalyType,
   generateAnomalyPatientVitals,
@@ -23,32 +52,24 @@ import {
   pickRandomAnomalyType,
   pickRandomPatients,
 } from './utils/generateDemoPatientVitals';
+import {
+  DepartmentCategory,
+  HicardiIndication,
+  PatientTargets,
+  PatientVitalSnapshot,
+  SignalQuality,
+  TransferSource,
+  TransplantSubtype,
+  VitalMetricType,
+  WardPatient,
+} from './types/emrTypes';
+import { evaluateHicardiDecision } from './utils/hicardiDecisionEngine';
+import { calculateNews2 } from './utils/news2Calculator';
 
-type Tab = 'criteria' | 'patients' | 'setup' | 'manual' | 'qa';
-type DepartmentCategory =
-  | 'transplantVascularSurgery'
-  | 'colorectalSurgery'
-  | 'pediatricSurgery'
-  | 'hepatobiliaryPancreaticSurgery'
-  | 'gastrointestinalSurgery'
-  | 'endocrineSurgery'
-  | 'icuTransferOther';
-type TransplantSubtype = 'liver' | 'kidney';
-type TransferSource = 'ward' | 'operatingRoom' | 'icu' | 'otherDepartmentIcu' | 'other';
+type Tab = 'criteria' | 'patients' | 'manual' | 'qa';
 type PatientStatus = 'stable' | 'caution' | 'checkRequired';
-type SignalQuality = 'good' | 'weak' | 'poor';
-type HicardiIndication = 'icuTransfer' | 'kidneyTransplant' | 'liverTransplant';
-type VitalMetricName = 'HR' | 'SpO2' | 'RR' | 'SkinTemp';
-type PatientTargets = {
-  hrMin: number;
-  hrMax: number;
-  spo2Min: number;
-  spo2Max: number;
-  rrMin: number;
-  rrMax: number;
-  skinTempMin: number;
-  skinTempMax: number;
-};
+type VitalMetricName = VitalMetricType;
+type DemoSearchResult = NonNullable<Awaited<ReturnType<typeof searchDemoEmrPatientByNumber>>>;
 
 type PatientAlertState = {
   patientId: string;
@@ -59,41 +80,14 @@ type PatientAlertState = {
   suppressAlertUntil?: number;
 };
 
-type Patient = {
-  id: string;
+type Patient = WardPatient & {
   name: string;
-  patientNumber?: string;
   indication?: HicardiIndication;
-  departmentCategory: DepartmentCategory;
-  transplantSubtype?: TransplantSubtype;
-  transferSource?: TransferSource;
-  applicationReason?: string;
-  memo?: string;
-  targets: PatientTargets;
-  room: string;
-  bed?: string;
-  pod?: number;
-  hicardiStartTime?: string;
   status: PatientStatus;
   latestAlert?: string;
   battery: number;
-  isDemoData: true;
 };
-
-type VitalSign = {
-  patientId: string;
-  hr: number;
-  rr: number;
-  spo2: number;
-  temperature: number;
-  signalQuality: SignalQuality;
-  ekgWaveform: number[];
-  hrTrend: number[];
-  rrTrend: number[];
-  spo2Trend: number[];
-  temperatureTrend: number[];
-  isDemoData: true;
-};
+type VitalSign = PatientVitalSnapshot;
 
 const theme = {
   primary: '#1E5B8C',
@@ -162,16 +156,7 @@ function applyDefaultTypography() {
 
 applyDefaultTypography();
 
-const defaultTargets: PatientTargets = {
-  hrMin: 60,
-  hrMax: 100,
-  spo2Min: 95,
-  spo2Max: 100,
-  rrMin: 12,
-  rrMax: 20,
-  skinTempMin: 35.8,
-  skinTempMax: 37.4,
-};
+const MANUAL_FAVORITES_KEY = 'manual_favorites';
 
 const statusLabels: Record<PatientStatus, string> = {
   stable: 'Stable demo',
@@ -194,158 +179,140 @@ const checklistItems = [
   ['handoff', '신규 간호사 인계 또는 집중 관찰 필요', 1, '운영 프로세스 표준화를 보여주기 위한 임시 문항입니다.'],
 ] as const;
 
-const setupSteps = [
-  '환자 확인',
-  '환자등록 정보 확인',
-  '피부 상태 확인',
-  '기기 번호 확인',
-  '기기 배터리 확인',
-  '패치 부착',
-  '환자-기기 매칭',
-  'EKG / HR / RR 표시 확인',
-  '알람 상태 확인',
-  '적용 시작 시간 기록',
-];
-
-const manualItems = [
-  '환자 등록 방법',
-  '기기 연결 확인 방법',
-  'EKG 신호 확인 방법',
-  '알람 확인 방법',
-  '배터리 확인 방법',
-  '패치 재부착 또는 교체 시 확인사항',
-  '적용 종료 및 기기 회수 방법',
-  '인계 시 확인할 내용',
-];
-
-const qaItems = [
-  'EKG 신호가 보이지 않아요',
-  'HR 값이 평소와 다르게 보여요',
-  'RR 값이 표시되지 않아요',
-  '알람이 계속 떠요',
-  '환자 목록에 나타나지 않아요',
-  '기기 배터리가 부족해요',
-  '패치가 떨어졌어요',
-  '연결이 끊어졌어요',
-  '적용 종료는 어떻게 하나요?',
-];
-
-const initialPatients: Patient[] = [
-  {
-    id: 'p1',
-    name: '김OO',
-    patientNumber: 'P-240601',
-    indication: 'kidneyTransplant',
-    departmentCategory: 'transplantVascularSurgery',
-    transplantSubtype: 'kidney',
-    transferSource: 'operatingRoom',
-    applicationReason: '신장이식 후 시연용 관찰',
-    memo: '시연용 가상 환자',
-    targets: { ...defaultTargets },
-    room: '601',
-    bed: '1',
-    pod: 2,
-    hicardiStartTime: '오늘 08:20',
+function mapWardPatientToLegacyPatient(patient: WardPatient & { indication?: HicardiIndication }): Patient {
+  return {
+    ...patient,
+    name: patient.displayName,
+    indication: patient.indication,
     status: 'stable',
     latestAlert: 'Stable demo',
-    battery: 84,
-    isDemoData: true,
-  },
-  {
-    id: 'p2',
-    name: '이OO',
-    patientNumber: 'P-240602',
-    indication: 'liverTransplant',
-    departmentCategory: 'transplantVascularSurgery',
-    transplantSubtype: 'liver',
-    transferSource: 'operatingRoom',
-    applicationReason: '간이식 후 시연용 관찰',
-    memo: '시연용 가상 환자',
-    targets: { ...defaultTargets, hrMax: 110, spo2Min: 94 },
-    room: '602',
-    bed: '2',
-    pod: 1,
-    hicardiStartTime: '오늘 10:05',
-    status: 'stable',
-    latestAlert: 'Stable demo',
-    battery: 56,
-    isDemoData: true,
-  },
-  {
-    id: 'p3',
-    name: '박OO',
-    patientNumber: 'P-240603',
-    indication: 'icuTransfer',
-    departmentCategory: 'icuTransferOther',
-    transferSource: 'icu',
-    applicationReason: '중환자실 이송 후 시연용 관찰',
-    memo: '시연용 가상 환자',
-    targets: { ...defaultTargets, hrMax: 120 },
-    room: '603',
-    bed: '1',
-    pod: 4,
-    hicardiStartTime: '어제 21:40',
-    status: 'stable',
-    latestAlert: 'Stable demo',
-    battery: 78,
-    isDemoData: true,
-  },
-];
+    battery: patient.battery ?? 90,
+  };
+}
 
-const initialVitals: Record<string, VitalSign> = {
-  p1: createVital('p1', 78, 18, 98, 36.8, 'good'),
-  p2: createVital('p2', 88, 17, 98, 36.4, 'good'),
-  p3: createVital('p3', 84, 18, 97, 36.5, 'good'),
-};
+function cloneLegacyPatient(patient: Patient): Patient {
+  return {
+    ...patient,
+    targets: { ...patient.targets },
+  };
+}
 
-const demoPatientTemplates = [
-  { name: '김OO', patientNumber: 'P-240601', indication: 'kidneyTransplant' as HicardiIndication, departmentCategory: 'transplantVascularSurgery' as DepartmentCategory, transplantSubtype: 'kidney' as TransplantSubtype, transferSource: 'operatingRoom' as TransferSource, applicationReason: '신장이식 후 시연용 관찰', targets: { ...defaultTargets }, room: '601', bed: '1', pod: 2 },
-  { name: '이OO', patientNumber: 'P-240602', indication: 'liverTransplant' as HicardiIndication, departmentCategory: 'transplantVascularSurgery' as DepartmentCategory, transplantSubtype: 'liver' as TransplantSubtype, transferSource: 'operatingRoom' as TransferSource, applicationReason: '간이식 후 시연용 관찰', targets: { ...defaultTargets, hrMax: 110, spo2Min: 94 }, room: '602', bed: '2', pod: 1 },
-  { name: '박OO', patientNumber: 'P-240603', indication: 'icuTransfer' as HicardiIndication, departmentCategory: 'icuTransferOther' as DepartmentCategory, transferSource: 'icu' as TransferSource, applicationReason: '중환자실 이송 후 시연용 관찰', targets: { ...defaultTargets, hrMax: 120 }, room: '603', bed: '1', pod: 4 },
-  { name: '최OO', patientNumber: 'P-240604', indication: 'icuTransfer' as HicardiIndication, departmentCategory: 'gastrointestinalSurgery' as DepartmentCategory, transferSource: 'ward' as TransferSource, applicationReason: '위장관 외과 수술 후 시연용 관찰', targets: { ...defaultTargets }, room: '604', bed: '2', pod: 3 },
-  { name: '정OO', patientNumber: 'P-240605', indication: 'icuTransfer' as HicardiIndication, departmentCategory: 'hepatobiliaryPancreaticSurgery' as DepartmentCategory, transferSource: 'operatingRoom' as TransferSource, applicationReason: '간담췌외과 수술 후 시연용 관찰', targets: { ...defaultTargets, spo2Min: 94 }, room: '605', bed: '1', pod: 5 },
-];
+const bootstrapPatients = getDemoWardPatientsSnapshot().map(mapWardPatientToLegacyPatient);
+const bootstrapVitals = getDemoVitalsSnapshotMap();
+const bootstrapSelectedPatientId = bootstrapPatients[0]?.id ?? '';
 
 export default function App() {
+  const contentScrollRef = React.useRef<ScrollView>(null);
   const [fontsLoaded] = useFonts(customFontAssets);
   const [tab, setTab] = useState<Tab>('patients');
-  const [patients, setPatients] = useState(initialPatients);
-  const [selectedPatientId, setSelectedPatientId] = useState('p1');
-  const [vitals, setVitals] = useState(initialVitals);
+  const [patients, setPatients] = useState<Patient[]>(bootstrapPatients);
+  const [selectedPatientId, setSelectedPatientId] = useState(bootstrapSelectedPatientId);
+  const [vitals, setVitals] = useState<Record<string, VitalSign>>(bootstrapVitals);
   const [isDemoAnomalyMode, setIsDemoAnomalyMode] = useState(false);
   const [anomalyTypes, setAnomalyTypes] = useState<Record<string, DemoAnomalyType>>({});
   const [patientAlertStates, setPatientAlertStates] = useState<Record<string, PatientAlertState>>({});
-  const [expandedPatientId, setExpandedPatientId] = useState<string | null>('p1');
+  const [expandedPatientId, setExpandedPatientId] = useState<string | null>(bootstrapSelectedPatientId || null);
   const [blinkOn, setBlinkOn] = useState(true);
   const [reduceMotion, setReduceMotion] = useState(false);
-  const [checkedItems, setCheckedItems] = useState<string[]>([]);
-  const [setupDone, setSetupDone] = useState<string[]>([]);
   const [manualSearch, setManualSearch] = useState('');
   const [manualSearchHistory, setManualSearchHistory] = useState<string[]>([]);
   const [qaSearch, setQaSearch] = useState('');
-  const [manualDetail, setManualDetail] = useState<string | null>(null);
-  const [qaDetail, setQaDetail] = useState<string | null>(null);
-  const [favorites, setFavorites] = useState<string[]>(['배터리 확인 방법']);
-  const [patientForm, setPatientForm] = useState({
-    name: 'OOO',
-    tempId: 'DEMO-001',
-    room: '601',
-    bed: '1',
-    departmentCategory: 'transplantVascularSurgery' as DepartmentCategory,
-    transplantSubtype: 'kidney' as TransplantSubtype,
-    transferSource: 'operatingRoom' as TransferSource,
-    pod: '1',
-    applicationReason: '시연용 적용 사유',
-    memo: '시연용 가상 환자 메모',
-    targets: { ...defaultTargets },
+  const [favorites, setFavorites] = useState<string[]>([]);
+  const [patientSearchNumber, setPatientSearchNumber] = useState('');
+  const [searchFeedback, setSearchFeedback] = useState<string | null>(null);
+  const [isPatientSearchModalVisible, setIsPatientSearchModalVisible] = useState(false);
+  const [searchedPatientResult, setSearchedPatientResult] = useState<DemoSearchResult | null>(null);
+  const [searchedHicardiVital, setSearchedHicardiVital] = useState<VitalSnapshot | null>(null);
+  const [assessmentPatient, setAssessmentPatient] = useState<DemoSearchResult | null>(null);
+  const [assessmentInput, setAssessmentInput] = useState<News2Input | null>(null);
+  const [specialCriteria, setSpecialCriteria] = useState<HicardiSpecialCriteria>({
+    icuOrEr: false,
+    highRiskSurgeryOrTransplant: false,
+    age65OrOlder: false,
   });
-  const [editingPatientId, setEditingPatientId] = useState<string | null>(null);
-  const [applicator, setApplicator] = useState('RN');
+  const [emergencyApply, setEmergencyApply] = useState(false);
+  const [assessmentRecords, setAssessmentRecords] = useState<HicardiAssessmentRecord[]>([]);
+
+  useEffect(() => {
+    if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+      UIManager.setLayoutAnimationEnabledExperimental(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    async function hydrateManualFavorites() {
+      try {
+        const raw = await AsyncStorage.getItem(MANUAL_FAVORITES_KEY);
+        if (!raw || !active) return;
+        const parsed = JSON.parse(raw) as Array<{ stepId?: string }>;
+        const validIds = new Set(manualSteps.map((step) => step.id));
+        const nextFavorites = parsed
+          .map((item) => item.stepId)
+          .filter((stepId): stepId is string => Boolean(stepId && validIds.has(stepId)));
+        if (active) {
+          setFavorites(nextFavorites);
+        }
+      } catch {
+        if (active) {
+          setFavorites([]);
+        }
+      }
+    }
+
+    hydrateManualFavorites().catch(() => undefined);
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    AsyncStorage.setItem(
+      MANUAL_FAVORITES_KEY,
+      JSON.stringify(favorites.map((stepId) => ({ stepId }))),
+    ).catch(() => undefined);
+  }, [favorites]);
 
   useEffect(() => {
     AccessibilityInfo.isReduceMotionEnabled().then(setReduceMotion).catch(() => setReduceMotion(false));
     const subscription = AccessibilityInfo.addEventListener?.('reduceMotionChanged', setReduceMotion);
     return () => subscription?.remove?.();
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    async function hydrateFromRepository() {
+      const wardPatients = await emrRepository.getWardPatients();
+      if (!active) return;
+
+      const nextPatients = wardPatients.map((patient) => mapWardPatientToLegacyPatient(patient as WardPatient & { indication?: HicardiIndication }));
+      setPatients(nextPatients);
+      setSelectedPatientId((current) => current || nextPatients[0]?.id || '');
+      setExpandedPatientId((current) => current ?? nextPatients[0]?.id ?? null);
+
+      const vitalEntries = await Promise.all(
+        wardPatients.map(async (patient) => {
+          const vital = await emrRepository.getPatientVitals(patient.id);
+          return [patient.id, vital] as const;
+        }),
+      );
+
+      if (!active) return;
+
+      setVitals((current) => ({
+        ...current,
+        ...Object.fromEntries(vitalEntries.filter((entry): entry is [string, VitalSign] => Boolean(entry[1]))),
+      }));
+    }
+
+    hydrateFromRepository().catch(() => undefined);
+
+    return () => {
+      active = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -389,12 +356,24 @@ export default function App() {
     return () => clearInterval(timer);
   }, []);
 
-  const totalScore = useMemo(
-    () => checklistItems.filter(([id]) => checkedItems.includes(id)).reduce((sum, item) => sum + item[2], 0),
-    [checkedItems],
-  );
-  const decision = getDecision(totalScore);
   const selectedPatient = patients.find((patient) => patient.id === selectedPatientId) ?? patients[0];
+  const appliedPatients = patients.filter((patient) => patient.hicardiStatus === 'applied');
+  const selectedAppliedPatient = appliedPatients.find((patient) => patient.id === selectedPatientId) ?? appliedPatients[0] ?? selectedPatient;
+  const assessmentNews2Result = useMemo<News2Result | null>(
+    () => (assessmentInput ? calculateNews2(assessmentInput) : null),
+    [assessmentInput],
+  );
+  const assessmentDecision = useMemo(
+    () => (assessmentNews2Result ? evaluateHicardiDecision(assessmentNews2Result, specialCriteria, emergencyApply) : null),
+    [assessmentNews2Result, specialCriteria, emergencyApply],
+  );
+  const selectedPatientAssessmentRecords = useMemo(
+    () =>
+      assessmentPatient
+        ? assessmentRecords.filter((record) => record.patientNumber === assessmentPatient.patient.patientNumber).sort((a, b) => b.assessedAt.localeCompare(a.assessedAt))
+        : [],
+    [assessmentPatient, assessmentRecords],
+  );
 
   const saveManualSearch = (value: string) => {
     const normalized = value.trim();
@@ -402,50 +381,204 @@ export default function App() {
     setManualSearchHistory((current) => [normalized, ...current.filter((item) => item.toLowerCase() !== normalized.toLowerCase())].slice(0, 5));
   };
 
-  const addSetupPatient = () => {
-    if (setupDone.length !== setupSteps.length) return;
-    const id = `demo-${Date.now()}`;
+  const selectCandidatePatient = (patientId: string) => {
+    setSelectedPatientId(patientId);
+    setExpandedPatientId(patientId);
+  };
+
+  const handlePatientSearch = async () => {
+    const normalized = patientSearchNumber.trim().toUpperCase();
+    setPatientSearchNumber(normalized);
+    if (!normalized) {
+      setSearchFeedback('환자번호를 입력하세요.');
+      setSearchedPatientResult(null);
+      setSearchedHicardiVital(null);
+      setIsPatientSearchModalVisible(false);
+      return;
+    }
+
+    const result = await searchDemoEmrPatientByNumber(normalized);
+    if (!result) {
+      setSearchFeedback('해당 환자번호와 일치하는 EMR 연동 환자 정보가 없습니다. 본 앱은 시연용 더미 데이터만 제공합니다.');
+      setSearchedPatientResult(null);
+      setSearchedHicardiVital(null);
+      setIsPatientSearchModalVisible(false);
+      return;
+    }
+
+    const latestPayload = await demoHicardiClient.getLatestPayloadByPatientNumber(normalized);
+    setSearchedHicardiVital(latestPayload ? mapRawHicardiPayloadToVitalSnapshot(normalized, latestPayload) : null);
+    setSearchedPatientResult(result);
+    setSearchFeedback(null);
+    setIsPatientSearchModalVisible(true);
+  };
+
+  const startAssessmentForPatient = () => {
+    if (!searchedPatientResult) return;
+    setAssessmentPatient(searchedPatientResult);
+    setAssessmentInput(mapVitalSnapshotToNews2Input(searchedPatientResult.vital));
+    setSpecialCriteria(getDefaultSpecialCriteria(searchedPatientResult.patient, searchedPatientResult.meta));
+    setEmergencyApply(false);
+    setIsPatientSearchModalVisible(false);
+  };
+
+  const updateSpecialCriterion = (key: keyof HicardiSpecialCriteria) => {
+    setSpecialCriteria((current) => ({ ...current, [key]: !current[key] }));
+  };
+
+  const upsertPatientFromAssessment = (
+    patient: AppPatient,
+    status: HicardiAssessmentRecord['status'],
+    reason: string,
+  ) => {
+    const legacyStatus = mapAssessmentStatusToLegacyStatus(status);
+    const existingPatient = patients.find((item) => item.patientNumber === patient.patientNumber);
+    const startedAt = new Date().toLocaleString('ko-KR', {
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+
+    if (existingPatient) {
+      setPatients((current) =>
+        current.map((item) =>
+          item.patientNumber === patient.patientNumber
+            ? {
+                ...item,
+                displayName: patient.displayName,
+                name: patient.displayName,
+                emrPatientId: patient.emrPatientId,
+                encounterId: patient.encounterId,
+                departmentCategory: mapDepartmentLabelToLegacyCategory(patient.departmentCategory),
+                transplantSubtype: patient.transplantSubtype,
+                transferSource: mapTransferLabelToLegacySource(patient.transferSource),
+                pod: patient.pod,
+                applicationReason: reason,
+                hicardiStatus: legacyStatus,
+                latestAlert: `${getAssessmentStatusLabel(status)} / 시연용 프로토타입`,
+                hicardiStartTime: legacyStatus === 'applied' ? startedAt : item.hicardiStartTime,
+              }
+            : item,
+        ),
+      );
+      setSelectedPatientId(existingPatient.id);
+      setExpandedPatientId(existingPatient.id);
+      return;
+    }
+
+    const newId = `assessment-${patient.patientNumber}`;
     const newPatient: Patient = {
-      id,
-      name: patientForm.name || '가상 환자',
-      patientNumber: patientForm.tempId || `DEMO-${Date.now()}`,
-      indication: getIndicationFromPatient(patientForm.departmentCategory, patientForm.transplantSubtype),
-      departmentCategory: patientForm.departmentCategory,
-      transplantSubtype: getTransplantSubtypeForSave(patientForm.departmentCategory, patientForm.transplantSubtype),
-      transferSource: patientForm.transferSource,
-      applicationReason: patientForm.applicationReason,
-      memo: patientForm.memo,
-      targets: patientForm.targets,
-      room: patientForm.room || '000',
-      bed: patientForm.bed || '0',
-      pod: Number(patientForm.pod) || 0,
-      hicardiStartTime: new Date().toLocaleString('ko-KR', {
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-      }),
+      id: newId,
+      emrPatientId: patient.emrPatientId,
+      encounterId: patient.encounterId,
+      displayName: patient.displayName,
+      name: patient.displayName,
+      patientNumber: patient.patientNumber,
+      indication: getIndicationFromPatient(
+        mapDepartmentLabelToLegacyCategory(patient.departmentCategory),
+        patient.transplantSubtype,
+      ),
+      departmentCategory: mapDepartmentLabelToLegacyCategory(patient.departmentCategory),
+      transplantSubtype: patient.transplantSubtype,
+      transferSource: mapTransferLabelToLegacySource(patient.transferSource),
+      applicationReason: reason,
+      memo: '적용 평가 화면에서 생성된 시연용 환자입니다.',
+      targets: { ...defaultTargets },
+      room: patient.room.replace('8A-', ''),
+      bed: patient.bed,
+      pod: patient.pod,
+      hicardiStatus: legacyStatus,
+      hicardiStartTime: legacyStatus === 'applied' ? startedAt : undefined,
       status: 'stable',
-      latestAlert: `세팅 완료: ${applicator || '적용자 미입력'} / 시연용 더미 데이터`,
-      battery: 92,
+      latestAlert: `${getAssessmentStatusLabel(status)} / 시연용 프로토타입`,
+      battery: 88,
+      source: 'demo',
       isDemoData: true,
     };
     setPatients((current) => [newPatient, ...current]);
-    setVitals((current) => ({ ...current, [id]: createVital(id, 82, 18, 98, 36.7, 'good') }));
-    setSelectedPatientId(id);
-    setTab('patients');
+    setVitals((current) => ({
+      ...current,
+      [newId]: createVital(
+        newId,
+        assessmentPatient?.vital.hr ?? 82,
+        assessmentPatient?.vital.rr ?? 18,
+        assessmentPatient?.vital.spo2 ?? 98,
+        assessmentPatient?.vital.temperature ?? 36.7,
+        'good',
+      ),
+    }));
+    setSelectedPatientId(newId);
+    setExpandedPatientId(newId);
+  };
+
+  const createAssessmentRecord = (
+    status: HicardiAssessmentRecord['status'],
+    statusReasonSuffix?: string,
+  ): HicardiAssessmentRecord | null => {
+    if (!assessmentPatient || !assessmentInput || !assessmentNews2Result || !assessmentDecision) return null;
+    const specialCriteriaCount = countSpecialCriteria(specialCriteria);
+    const applicationReason = buildAssessmentReasonSummary(
+      assessmentPatient.patient,
+      assessmentNews2Result,
+      specialCriteria,
+      assessmentDecision.finalLabel,
+      emergencyApply,
+      statusReasonSuffix,
+    );
+    return {
+      id: `assessment-${assessmentPatient.patient.patientNumber}-${Date.now()}`,
+      patientNumber: assessmentPatient.patient.patientNumber,
+      emrPatientId: assessmentPatient.patient.emrPatientId,
+      encounterId: assessmentPatient.patient.encounterId,
+      assessedAt: new Date().toISOString(),
+      news2Score: assessmentNews2Result.totalScore,
+      news2Band: assessmentNews2Result.band,
+      specialCriteria,
+      specialCriteriaCount,
+      decision: assessmentDecision.decision,
+      status,
+      applicationReason,
+      nextReassessmentLabel: assessmentDecision.nextReassessmentLabel,
+      source: 'demo',
+    };
+  };
+
+  const saveAssessmentRecord = (status: HicardiAssessmentRecord['status']) => {
+    const record = createAssessmentRecord(status);
+    if (!record || !assessmentPatient) return;
+    setAssessmentRecords((current) => [record, ...current]);
+    const monitoringOrder = mapAssessmentToHicardiMonitoringOrder(record);
+    upsertPatientFromAssessment(assessmentPatient.patient, status, `${record.applicationReason} / ${monitoringOrder.note}`);
+  };
+
+  const resetAssessment = () => {
+    if (!assessmentPatient) return;
+    setAssessmentInput(mapVitalSnapshotToNews2Input(assessmentPatient.vital));
+    setSpecialCriteria(getDefaultSpecialCriteria(assessmentPatient.patient, assessmentPatient.meta));
+    setEmergencyApply(false);
+  };
+
+  const updateSelectedPatientApplicationReason = (value: string) => {
+    setPatients((current) =>
+      current.map((patient) => (patient.id === selectedPatientId ? { ...patient, applicationReason: value } : patient)),
+    );
+  };
+
+  const updatePatientTargets = (patientId: string, targets: PatientTargets) => {
+    setPatients((current) => current.map((patient) => (patient.id === patientId ? { ...patient, targets } : patient)));
   };
 
   const generateDemoData = () => {
     const statuses: PatientStatus[] = ['stable', 'stable', 'stable', 'stable', 'stable'];
-    const demoPatients = demoPatientTemplates.map((template, index) => {
+    const demoPatients = getDemoWardPatientTemplatesSnapshot().map((template, index) => {
       const id = `demo-p${index + 1}-${Date.now()}`;
       const battery = clamp(Math.round(92 - index * 16 + randomStep(8)), 12, 98);
-      const latestAlert =
-        statuses[index] === 'stable' ? '최근 알람 없음' : statuses[index] === 'caution' ? 'HR/RR 변화 관찰' : '신호 또는 산소포화도 확인';
       return {
-        ...template,
+        ...mapWardPatientToLegacyPatient(template),
         id,
+        emrPatientId: `${template.emrPatientId}-${Date.now()}`,
+        encounterId: `${template.encounterId ?? template.id}-${Date.now()}`,
         hicardiStartTime: `오늘 ${String(8 + index).padStart(2, '0')}:${index % 2 === 0 ? '20' : '45'}`,
         status: statuses[index],
         latestAlert: 'Stable demo',
@@ -523,23 +656,6 @@ export default function App() {
     );
   };
 
-  const resetPatientForm = () => {
-    setPatientForm({
-      name: '',
-      tempId: `DEMO-${Date.now()}`,
-      room: '',
-      bed: '',
-      departmentCategory: 'transplantVascularSurgery',
-      transplantSubtype: 'kidney',
-      transferSource: 'ward',
-      pod: '',
-      applicationReason: '',
-      memo: '',
-      targets: { ...defaultTargets },
-    });
-    setEditingPatientId(null);
-  };
-
   const acknowledgePatientAnomaly = (patientId: string) => {
     const now = Date.now();
     const patient = patients.find((item) => item.id === patientId);
@@ -557,84 +673,6 @@ export default function App() {
     }));
   };
 
-  const selectPatientForEdit = (patient: Patient) => {
-    setEditingPatientId(patient.id);
-    setPatientForm({
-      name: patient.name,
-      tempId: patient.patientNumber ?? patient.id,
-      room: patient.room,
-      bed: patient.bed ?? '',
-      departmentCategory: patient.departmentCategory,
-      transplantSubtype: patient.transplantSubtype ?? 'kidney',
-      transferSource: patient.transferSource ?? 'ward',
-      pod: patient.pod === undefined ? '' : `${patient.pod}`,
-      applicationReason: patient.applicationReason ?? '',
-      memo: patient.memo ?? '',
-      targets: { ...(patient.targets ?? defaultTargets) },
-    });
-  };
-
-  const savePatientRegistration = () => {
-    const targets = normalizeTargets(patientForm.targets);
-    if (editingPatientId) {
-      setPatients((current) =>
-        current.map((patient) =>
-          patient.id === editingPatientId
-            ? {
-                ...patient,
-                name: patientForm.name || '가상 환자',
-                patientNumber: patientForm.tempId || patient.patientNumber,
-                indication: getIndicationFromPatient(patientForm.departmentCategory, patientForm.transplantSubtype),
-                departmentCategory: patientForm.departmentCategory,
-                transplantSubtype: getTransplantSubtypeForSave(patientForm.departmentCategory, patientForm.transplantSubtype),
-                transferSource: patientForm.transferSource,
-                applicationReason: patientForm.applicationReason,
-                memo: patientForm.memo,
-                room: patientForm.room || '000',
-                bed: patientForm.bed,
-                pod: Number(patientForm.pod) || 0,
-                targets,
-              }
-            : patient,
-        ),
-      );
-      resetPatientForm();
-      return;
-    }
-
-    const id = `patient-${Date.now()}`;
-    const newPatient: Patient = {
-      id,
-      name: patientForm.name || '가상 환자',
-      patientNumber: patientForm.tempId || `DEMO-${Date.now()}`,
-      indication: getIndicationFromPatient(patientForm.departmentCategory, patientForm.transplantSubtype),
-      departmentCategory: patientForm.departmentCategory,
-      transplantSubtype: getTransplantSubtypeForSave(patientForm.departmentCategory, patientForm.transplantSubtype),
-      transferSource: patientForm.transferSource,
-      applicationReason: patientForm.applicationReason,
-      memo: patientForm.memo,
-      targets,
-      room: patientForm.room || '000',
-      bed: patientForm.bed,
-      pod: Number(patientForm.pod) || 0,
-      hicardiStartTime: new Date().toLocaleString('ko-KR', {
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-      }),
-      status: 'stable',
-      latestAlert: 'Stable demo',
-      battery: 90,
-      isDemoData: true,
-    };
-    setPatients((current) => [newPatient, ...current]);
-    setVitals((current) => ({ ...current, [id]: createVital(id, 82, 18, 98, 36.7, 'good') }));
-    setSelectedPatientId(id);
-    setExpandedPatientId(id);
-    resetPatientForm();
-  };
-
   const toggleExpandedPatient = (patientId: string) => {
     setSelectedPatientId(patientId);
     setExpandedPatientId((current) => (current === patientId ? null : patientId));
@@ -649,28 +687,40 @@ export default function App() {
           <Text style={styles.headerTitle}>YOUR_Cardi:</Text>
           <Text style={styles.headerSubtitle}>HiCardi 적용 판단과 모니터링 보조 병동 간호 지원 어플리케이션</Text>
         </View>
-        <ScrollView contentContainerStyle={styles.content}>
+        <ScrollView ref={contentScrollRef} contentContainerStyle={styles.content}>
           {tab === 'criteria' && (
             <CriteriaScreen
-              checkedItems={checkedItems}
-              setCheckedItems={setCheckedItems}
-              totalScore={totalScore}
-              decision={decision}
-              patientForm={patientForm}
-              setPatientForm={setPatientForm}
-              patients={patients}
-              editingPatientId={editingPatientId}
-              savePatientRegistration={savePatientRegistration}
-              selectPatientForEdit={selectPatientForEdit}
-              cancelPatientEdit={resetPatientForm}
-              goSetup={() => setTab('setup')}
+              patientSearchNumber={patientSearchNumber}
+              setPatientSearchNumber={setPatientSearchNumber}
+              onSearch={handlePatientSearch}
+              searchFeedback={searchFeedback}
+              searchedPatientResult={searchedPatientResult}
+              searchedHicardiVital={searchedHicardiVital}
+              isPatientSearchModalVisible={isPatientSearchModalVisible}
+              setIsPatientSearchModalVisible={setIsPatientSearchModalVisible}
+              startAssessmentForPatient={startAssessmentForPatient}
+              assessmentPatient={assessmentPatient}
+              specialCriteria={specialCriteria}
+              updateSpecialCriterion={updateSpecialCriterion}
+              emergencyApply={emergencyApply}
+              setEmergencyApply={setEmergencyApply}
+              news2Result={assessmentNews2Result}
+              assessmentDecision={assessmentDecision}
+              assessmentRecords={selectedPatientAssessmentRecords}
+              saveAsCandidate={() => saveAssessmentRecord('candidate')}
+              saveAssessmentOnly={() => {
+                const record = createAssessmentRecord(assessmentDecision?.recommendedStatus ?? 'maintained');
+                if (!record) return;
+                setAssessmentRecords((current) => [record, ...current]);
+              }}
+              resetAssessment={resetAssessment}
             />
           )}
           {tab === 'patients' && (
             <PatientsScreen
-              patients={patients}
-              selectedPatient={selectedPatient}
-              selectedVital={vitals[selectedPatient.id]}
+              patients={appliedPatients}
+              selectedPatient={selectedAppliedPatient}
+              selectedVital={vitals[selectedAppliedPatient.id]}
               vitals={vitals}
               expandedPatientId={expandedPatientId}
               toggleExpandedPatient={toggleExpandedPatient}
@@ -678,19 +728,9 @@ export default function App() {
               toggleDemoAnomalyMode={toggleDemoAnomalyMode}
               patientAlertStates={patientAlertStates}
               acknowledgePatientAnomaly={acknowledgePatientAnomaly}
+              updatePatientTargets={updatePatientTargets}
               blinkOn={blinkOn}
               reduceMotion={reduceMotion}
-            />
-          )}
-          {tab === 'setup' && (
-            <SetupScreen
-              setupDone={setupDone}
-              setSetupDone={setSetupDone}
-              patientForm={patientForm}
-              setPatientForm={setPatientForm}
-              applicator={applicator}
-              setApplicator={setApplicator}
-              addSetupPatient={addSetupPatient}
             />
           )}
           {tab === 'manual' && (
@@ -699,13 +739,12 @@ export default function App() {
               setSearch={setManualSearch}
               saveSearch={saveManualSearch}
               searchHistory={manualSearchHistory}
-              detail={manualDetail}
-              setDetail={setManualDetail}
               favorites={favorites}
               setFavorites={setFavorites}
+              scrollToY={(y) => contentScrollRef.current?.scrollTo({ y, animated: true })}
             />
           )}
-          {tab === 'qa' && <QaScreen search={qaSearch} setSearch={setQaSearch} detail={qaDetail} setDetail={setQaDetail} />}
+          {tab === 'qa' && <QaScreen search={qaSearch} setSearch={setQaSearch} />}
         </ScrollView>
         <BottomTabs active={tab} setActive={setTab} />
       </View>
@@ -714,166 +753,257 @@ export default function App() {
 }
 
 function CriteriaScreen({
-  checkedItems,
-  setCheckedItems,
-  totalScore,
-  decision,
-  patientForm,
-  setPatientForm,
-  patients,
-  editingPatientId,
-  savePatientRegistration,
-  selectPatientForEdit,
-  cancelPatientEdit,
-  goSetup,
+  patientSearchNumber,
+  setPatientSearchNumber,
+  onSearch,
+  searchFeedback,
+  searchedPatientResult,
+  searchedHicardiVital,
+  isPatientSearchModalVisible,
+  setIsPatientSearchModalVisible,
+  startAssessmentForPatient,
+  assessmentPatient,
+  specialCriteria,
+  updateSpecialCriterion,
+  emergencyApply,
+  setEmergencyApply,
+  news2Result,
+  assessmentDecision,
+  assessmentRecords,
+  saveAsCandidate,
+  saveAssessmentOnly,
+  resetAssessment,
 }: {
-  checkedItems: string[];
-  setCheckedItems: React.Dispatch<React.SetStateAction<string[]>>;
-  totalScore: number;
-  decision: ReturnType<typeof getDecision>;
-  patientForm: {
-    name: string;
-    tempId: string;
-    room: string;
-    bed: string;
-    departmentCategory: DepartmentCategory;
-    transplantSubtype: TransplantSubtype;
-    transferSource: TransferSource;
-    pod: string;
-    applicationReason: string;
-    memo: string;
-    targets: PatientTargets;
-  };
-  setPatientForm: React.Dispatch<React.SetStateAction<CriteriaScreenProps['patientForm']>>;
-  patients: Patient[];
-  editingPatientId: string | null;
-  savePatientRegistration: () => void;
-  selectPatientForEdit: (patient: Patient) => void;
-  cancelPatientEdit: () => void;
-  goSetup: () => void;
+  patientSearchNumber: string;
+  setPatientSearchNumber: React.Dispatch<React.SetStateAction<string>>;
+  onSearch: () => void;
+  searchFeedback: string | null;
+  searchedPatientResult: DemoSearchResult | null;
+  searchedHicardiVital: VitalSnapshot | null;
+  isPatientSearchModalVisible: boolean;
+  setIsPatientSearchModalVisible: React.Dispatch<React.SetStateAction<boolean>>;
+  startAssessmentForPatient: () => void;
+  assessmentPatient: DemoSearchResult | null;
+  specialCriteria: HicardiSpecialCriteria;
+  updateSpecialCriterion: (key: keyof HicardiSpecialCriteria) => void;
+  emergencyApply: boolean;
+  setEmergencyApply: React.Dispatch<React.SetStateAction<boolean>>;
+  news2Result: News2Result | null;
+  assessmentDecision: ReturnType<typeof evaluateHicardiDecision> | null;
+  assessmentRecords: HicardiAssessmentRecord[];
+  saveAsCandidate: () => void;
+  saveAssessmentOnly: () => void;
+  resetAssessment: () => void;
 }) {
-  const checkedLabels = checklistItems.filter(([id]) => checkedItems.includes(id)).map(([, label]) => label);
-  const isTransplantVascularSurgery = patientForm.departmentCategory === 'transplantVascularSurgery';
-  const summary = `${patientForm.name || 'OOO'} 환자는 현재 HiCardi 체크리스트 임시 점수 ${totalScore}점으로, ${decision.title} 범위에 해당합니다. 체크된 주요 사유는 ${
-    checkedLabels.length ? checkedLabels.join(', ') : '없음'
-  }입니다. 단, 본 결과는 임시 기준에 따른 것으로 실제 적용 여부는 병동 프로토콜과 의료진 판단에 따라 결정해야 합니다.`;
-
+  const isDirectStart = Boolean(news2Result && news2Result.totalScore >= 7 && assessmentDecision);
+  const nextReassessmentLabel = assessmentDecision?.nextReassessmentLabel ?? '평가 후 재확인';
   return (
     <View style={styles.screen}>
-      <Notice title="임시안 / 실제 의료 판단용 아님" text={temporaryNotice} tone="warning" />
-      <Section title={editingPatientId ? '환자등록 수정' : '환자등록'}>
-        <Text style={styles.helperText}>실제 개인정보 대신 이니셜 또는 발표용 임시 ID를 입력하세요.</Text>
-        <View style={styles.twoCols}>
-          <Field label="환자명" value={patientForm.name} onChangeText={(name) => setPatientForm((p) => ({ ...p, name }))} />
-          <Field label="병실" value={patientForm.room} onChangeText={(room) => setPatientForm((p) => ({ ...p, room }))} />
-          <Field label="침상" value={patientForm.bed} onChangeText={(bed) => setPatientForm((p) => ({ ...p, bed }))} />
-          <Field label="POD" value={patientForm.pod} onChangeText={(pod) => setPatientForm((p) => ({ ...p, pod }))} keyboardType="numeric" />
-        </View>
-        <Text style={styles.label}>진료과/환자 대분류</Text>
-        <Segmented
-          value={patientForm.departmentCategory}
-          options={Object.entries(departmentCategoryLabels).map(([value, label]) => ({ value, label }))}
-          onChange={(departmentCategory) =>
-            setPatientForm((p) => ({
-              ...p,
-              departmentCategory: departmentCategory as DepartmentCategory,
-              transplantSubtype:
-                departmentCategory === 'transplantVascularSurgery' ? p.transplantSubtype : 'kidney',
-            }))
-          }
-        />
-        {isTransplantVascularSurgery ? (
-          <>
-            <Text style={styles.label}>이식혈관외과 세부 항목</Text>
-            <Segmented
-              value={patientForm.transplantSubtype}
-              options={Object.entries(transplantSubtypeLabels).map(([value, label]) => ({ value, label }))}
-              onChange={(transplantSubtype) => setPatientForm((p) => ({ ...p, transplantSubtype: transplantSubtype as TransplantSubtype }))}
+      <Notice
+        title={`현재 데이터 소스: ${CURRENT_DATA_SOURCE_LABEL}`}
+        text="본 화면은 실제 EMR과 연결되어 있지 않은 시연용 프로토타입입니다. 환자 정보와 생체정보는 미리 생성된 더미 데이터입니다."
+        tone="blue"
+      />
+      <Section title="HiCardi 적용 평가" caption="환자번호 검색을 통해 EMR 연동 환자 정보를 불러온 뒤, NEWS2와 8A 병동 특수 적용 기준을 바탕으로 HiCardi 적용 여부를 평가합니다.">
+        <Badge text="시연용 프로토타입 / 실제 EMR 연동 아님 / 실제 의료 판단 대체 아님" />
+        <Text style={styles.helperText}>예시 환자번호: P-240601, P-240602, P-240603, P-240604</Text>
+        <View style={styles.searchRow}>
+          <View style={styles.flex}>
+            <Field
+              label="환자번호 검색"
+              value={patientSearchNumber}
+              onChangeText={setPatientSearchNumber}
+              onBlur={onSearch}
+              placeholder="환자번호를 입력하세요"
             />
-          </>
-        ) : (
-          <Text style={styles.helperText}>이식혈관외과가 아닌 환자는 이식 세부 항목 없이 수술/질환 내용과 적용 사유를 아래에 기록하세요.</Text>
-        )}
-        <Text style={styles.label}>전동 출처</Text>
-        <Segmented
-          value={patientForm.transferSource}
-          options={Object.entries(transferSourceLabels).map(([value, label]) => ({ value, label }))}
-          onChange={(transferSource) => setPatientForm((p) => ({ ...p, transferSource: transferSource as TransferSource }))}
-        />
-        <Field label="적용 사유" value={patientForm.applicationReason} onChangeText={(applicationReason) => setPatientForm((p) => ({ ...p, applicationReason }))} multiline />
-        <Field label="메모" value={patientForm.memo} onChangeText={(memo) => setPatientForm((p) => ({ ...p, memo }))} multiline />
-        <PatientTargetFields targets={patientForm.targets} setTargets={(targets) => setPatientForm((p) => ({ ...p, targets }))} />
-        <View style={styles.formButtonRow}>
-          <Pressable style={styles.primaryButton} onPress={savePatientRegistration}>
-            <Text style={styles.primaryButtonText}>{editingPatientId ? '수정 저장' : '환자 등록'}</Text>
+          </View>
+          <Pressable style={styles.searchButton} onPress={onSearch}>
+            <Text style={styles.searchButtonText}>검색</Text>
           </Pressable>
-          {editingPatientId && (
-            <Pressable style={styles.secondaryButton} onPress={cancelPatientEdit}>
-              <Text style={styles.secondaryButtonText}>취소</Text>
-            </Pressable>
-          )}
         </View>
+        {searchFeedback ? <Text style={styles.warningText}>{searchFeedback}</Text> : null}
       </Section>
-      <Section title="등록된 환자 리스트">
-        {patients.map((patient) => (
-          <Pressable
-            key={patient.id}
-            style={[styles.patientCard, editingPatientId === patient.id && styles.patientCardActive]}
-            onPress={() => selectPatientForEdit(patient)}
-          >
-            <Text style={styles.cardTitle}>
-              {patient.name} · {patient.room}
-              {patient.bed ? `-${patient.bed}` : ''}
-            </Text>
-            <Text style={styles.cardText}>
-              {getPatientCategorySummary(patient)} · POD {patient.pod ?? '-'} · 전동 출처: {patient.transferSource ? transferSourceLabels[patient.transferSource] : '-'} · 시연용 더미 데이터
-            </Text>
-          </Pressable>
-        ))}
-      </Section>
-      <Section title="적용 기준 체크리스트 - 추후 확정 예정">
-        {checklistItems.map(([id, label, score, description]) => {
-          const selected = checkedItems.includes(id);
-          return (
-            <Pressable
-              key={id}
-              style={[styles.checkCard, selected && styles.checkCardActive]}
-              onPress={() =>
-                setCheckedItems((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]))
-              }
-            >
-              <View style={[styles.fakeCheck, selected && styles.fakeCheckActive]}>
-                <Text style={styles.fakeCheckText}>{selected ? '✓' : ''}</Text>
-              </View>
-              <View style={styles.flex}>
+
+      {assessmentPatient ? (
+        <>
+          <Section title="환자 요약 카드" caption="EMR 더미 데이터 기반으로 자동 채워진 평가 시작 정보입니다.">
+            <View style={styles.targetCard}>
+              <Text style={styles.cardTitle}>{assessmentPatient.patient.displayName}</Text>
+              <Text style={styles.cardText}>환자번호: {assessmentPatient.patient.patientNumber}</Text>
+              <Text style={styles.cardText}>병실/침상: {assessmentPatient.patient.room}-{assessmentPatient.patient.bed}</Text>
+              <Text style={styles.cardText}>진료과: {assessmentPatient.patient.departmentCategory}</Text>
+              <Text style={styles.cardText}>POD: {assessmentPatient.patient.pod ?? '-'}</Text>
+              <Text style={styles.cardText}>전동 출처: {assessmentPatient.patient.transferSource ?? '-'}</Text>
+              <Text style={styles.cardText}>최근 V/S 측정 시각: {formatDateTimeKorean(assessmentPatient.vital.measuredAt)}</Text>
+              <Text style={styles.cardText}>현재 HiCardi 상태: {getAssessmentStatusLabel(assessmentPatient.patient.currentHicardiStatus)}</Text>
+              <Badge text="EMR 더미 데이터 / read-only 환자 정보" />
+            </View>
+          </Section>
+
+          <Section title="NEWS2 자동 계산" caption="NEWS2는 임상 판단을 보조하는 도구이며, 실제 임상 판단을 대체하지 않습니다.">
+            <Text style={styles.helperText}>최근 EMR 더미 생체정보를 기준으로 자동 계산된 총점만 표시합니다.</Text>
+            {news2Result ? (
+              <View style={styles.news2HeroCard}>
                 <View style={styles.rowBetween}>
-                  <Text style={styles.cardTitle}>{label}</Text>
-                  <Text style={styles.score}>+{score}점</Text>
+                  <Text style={styles.resultTitle}>NEWS2 총점</Text>
+                  <Text style={styles.news2HeroValue}>{news2Result.totalScore}점</Text>
                 </View>
-                <Text style={styles.cardText}>{description}</Text>
-                <Badge text="임시 문항 / 추후 확정 예정" />
+                <Text style={styles.cardText}>점수 구간: {getNews2BandLabel(news2Result.band)}</Text>
               </View>
+            ) : null}
+            <Pressable style={[styles.inlineNoticeCard, emergencyApply && styles.inlineNoticeCardDanger]} onPress={() => setEmergencyApply((current) => !current)}>
+              <Text style={styles.cardTitle}>응급상황 예외 적용</Text>
+              <Text style={styles.cardText}>프로토타입 안내용 예외 흐름입니다. 실제 임상 결정을 대체하지 않습니다.</Text>
             </Pressable>
-          );
-        })}
-      </Section>
-      <Section title="임시 결과 판정">
-        <View style={[styles.resultCard, { borderColor: decision.color }]}>
-          <Text style={styles.resultScore}>{totalScore}점</Text>
-          <Text style={[styles.resultTitle, { color: decision.color }]}>{decision.title} - 임시 기준</Text>
-          <Text style={styles.cardText}>{decision.reason}</Text>
-          <Badge text="임시 기준 / 추후 확정 예정 / 실제 의료 판단용 아님" />
+          </Section>
+
+          {isDirectStart ? (
+            <Section title="HiCardi 적용 시작">
+              <View style={styles.startNowCard}>
+                <Text style={styles.startNowTitle}>HiCardi 적용 시작</Text>
+              </View>
+            </Section>
+          ) : (
+            <Section title="8A 병동 HiCardi 적용 판단 알고리즘" caption="병동 특수 적용 기준은 NEWS2 점수에 합산하지 않으며, NEWS2 5–6점 또는 1–4점 환자의 HiCardi 적용 판단을 보조하기 위해 사용합니다.">
+              <Text style={styles.helperText}>입원 시 NEWS2를 측정하고, 8A 병동 특수 기준 해당 여부를 별도로 확인하는 시연용 평가 흐름입니다.</Text>
+              <View style={styles.checkListBlock}>
+                {[
+                  ['icuOrEr', 'ICU 또는 ER 경유', '입원 전 또는 전동 전 ICU/ER 경유 환자'],
+                  ['highRiskSurgeryOrTransplant', '고위험 수술 또는 장기이식 수술', '전신마취 2시간 이상 또는 8A major operation 예시(TLTG, PPPD, PrPD, AAA, colectomy, KT, LT)'],
+                  ['age65OrOlder', '65세 이상', '입원일 기준 만 65세 이상 환자'],
+                ].map(([key, label, description]) => {
+                  const selected = specialCriteria[key as keyof HicardiSpecialCriteria];
+                  return (
+                    <Pressable key={key} style={[styles.checkCard, selected && styles.checkCardActive]} onPress={() => updateSpecialCriterion(key as keyof HicardiSpecialCriteria)}>
+                      <View style={[styles.fakeCheck, selected && styles.fakeCheckActive]}>
+                        <Text style={styles.fakeCheckText}>{selected ? '✓' : ''}</Text>
+                      </View>
+                      <View style={styles.flex}>
+                        <Text style={styles.cardTitle}>{label}</Text>
+                        <Text style={styles.cardText}>{description}</Text>
+                      </View>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              {assessmentDecision ? (
+                <View style={[styles.resultCard, { borderColor: getDecisionColor(assessmentDecision.decision) }]}>
+                  <Text style={[styles.resultTitle, { color: getDecisionColor(assessmentDecision.decision) }]}>{assessmentDecision.finalLabel}</Text>
+                  <Text style={styles.cardText}>{assessmentDecision.description}</Text>
+                  <Text style={styles.cardText}>다음 재평가: {assessmentDecision.nextReassessmentLabel}</Text>
+                </View>
+              ) : null}
+            </Section>
+          )}
+
+          <Section title="다음 재평가">
+            <View style={styles.reassessmentCard}>
+              <Text style={styles.reassessmentValue}>{nextReassessmentLabel}</Text>
+            </View>
+          </Section>
+
+          {news2Result && assessmentDecision ? (
+            <Section title="평가 결과 카드">
+              <View style={styles.resultCardStrong}>
+                <Text style={styles.cardTitle}>{assessmentPatient.patient.patientNumber}</Text>
+                <Text style={styles.cardText}>평가일시: {formatDateTimeKorean(new Date().toISOString())}</Text>
+                <Text style={styles.cardText}>NEWS2 총점: {news2Result.totalScore}점</Text>
+                <Text style={styles.cardText}>NEWS2 점수 구간: {getNews2BandLabel(news2Result.band)}</Text>
+                {!isDirectStart ? <Text style={styles.cardText}>병동 특수 적용 기준: {formatSpecialCriteriaSummary(specialCriteria)}</Text> : null}
+                <Text style={styles.cardText}>최종 판단: {assessmentDecision.finalLabel}</Text>
+                <Text style={styles.cardText}>다음 재평가: {assessmentDecision.nextReassessmentLabel}</Text>
+                <Text style={styles.cardText}>상태값: {assessmentDecision.recommendedStatus}</Text>
+                <Badge text="시연용 결과 카드 / 실제 임상 판단 대체 아님" />
+              </View>
+              <View style={styles.actionGrid}>
+                <Pressable style={styles.secondaryButton} onPress={saveAsCandidate}>
+                  <Text style={styles.secondaryButtonText}>적용 후보로 저장</Text>
+                </Pressable>
+                <Pressable style={styles.secondaryButton} onPress={saveAssessmentOnly}>
+                  <Text style={styles.secondaryButtonText}>평가 기록 저장</Text>
+                </Pressable>
+                <Pressable style={styles.secondaryButton} onPress={resetAssessment}>
+                  <Text style={styles.secondaryButtonText}>초기화</Text>
+                </Pressable>
+              </View>
+            </Section>
+          ) : null}
+
+          {assessmentRecords.length ? (
+            <Section title="평가 기록 누적">
+              {assessmentRecords.map((record) => (
+                <View key={record.id} style={styles.historyCard}>
+                  <Text style={styles.cardTitle}>{formatDateTimeKorean(record.assessedAt)}</Text>
+                  <Text style={styles.cardText}>NEWS2 {record.news2Score}점 ({getNews2BandLabel(record.news2Band)})</Text>
+                  <Text style={styles.cardText}>판단: {getAssessmentDecisionLabel(record.decision)}</Text>
+                  <Text style={styles.cardText}>상태값: {record.status}</Text>
+                  <Text style={styles.cardText}>재평가 기준: {record.nextReassessmentLabel ?? '-'}</Text>
+                </View>
+              ))}
+            </Section>
+          ) : null}
+        </>
+      ) : null}
+
+      <Modal visible={isPatientSearchModalVisible} transparent animationType="slide" onRequestClose={() => setIsPatientSearchModalVisible(false)}>
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>EMR 연동 환자 정보</Text>
+              <Pressable onPress={() => setIsPatientSearchModalVisible(false)}>
+                <Text style={styles.modalClose}>닫기</Text>
+              </Pressable>
+            </View>
+            {searchedPatientResult ? (
+              <>
+                <ScrollView style={styles.modalScroll} contentContainerStyle={styles.modalScrollContent}>
+                  <View style={styles.readOnlyInfoCard}>
+                    <Text style={styles.cardText}>환자번호: {searchedPatientResult.patient.patientNumber}</Text>
+                    <Text style={styles.cardText}>환자 표시명: {searchedPatientResult.patient.displayName}</Text>
+                    <Text style={styles.cardText}>병실/침상: {searchedPatientResult.patient.room}-{searchedPatientResult.patient.bed}</Text>
+                    <Text style={styles.cardText}>진료과/환자 대분류: {searchedPatientResult.patient.departmentCategory}</Text>
+                    <Text style={styles.cardText}>이식혈관외과 세부 항목: {searchedPatientResult.patient.transplantSubtype ? transplantSubtypeLabels[searchedPatientResult.patient.transplantSubtype] : '-'}</Text>
+                    <Text style={styles.cardText}>POD: {searchedPatientResult.patient.pod ?? '-'}</Text>
+                    <Text style={styles.cardText}>전동 출처: {searchedPatientResult.patient.transferSource ?? '-'}</Text>
+                    <Text style={styles.cardText}>최근 수술명: {searchedPatientResult.meta.recentSurgeryName}</Text>
+                    <Text style={styles.cardText}>수술시간: {searchedPatientResult.meta.surgeryDurationMinutes}분</Text>
+                    <Text style={styles.cardText}>전신마취 여부: {searchedPatientResult.meta.generalAnesthesia ? '예' : '아니오'}</Text>
+                    <Text style={styles.cardText}>최근 생체정보 측정 시각: {formatDateTimeKorean(searchedPatientResult.vital.measuredAt)}</Text>
+                    <View style={styles.modalDivider} />
+                    <Text style={styles.cardText}>인식 기기 번호: {searchedPatientResult.meta.deviceNumber}</Text>
+                    <Text style={styles.cardText}>인식된 스캐너: {searchedPatientResult.meta.scannerId}</Text>
+                    <View style={styles.modalDivider} />
+                    <Text style={styles.popupSectionTitle}>최근 V/S</Text>
+                    <View style={styles.vitalBadgeGrid}>
+                      {getPopupVitalItems(searchedPatientResult.vital).map((item) => (
+                        <View key={item.label} style={[styles.vitalBadgeCard, getPopupVitalToneStyle(item.tone)]}>
+                          <Text style={styles.vitalBadgeLabel}>{item.label}</Text>
+                          <Text style={styles.vitalBadgeValue}>{item.value}</Text>
+                        </View>
+                      ))}
+                    </View>
+                    <Text style={styles.cardText}>현재 HiCardi 상태: {getAssessmentStatusLabel(searchedPatientResult.patient.currentHicardiStatus)}</Text>
+                    {searchedHicardiVital ? (
+                      <Text style={styles.cardText}>HiCardi 더미 매핑 데이터 예시: HR {searchedHicardiVital.hr} / RR {searchedHicardiVital.rr} / SpO₂ {searchedHicardiVital.spo2}</Text>
+                    ) : null}
+                    <View style={styles.popupBadgeWrap}>
+                      <Badge text="read-only / 시연용 더미 데이터" />
+                    </View>
+                  </View>
+                </ScrollView>
+                <View style={styles.stickyModalFooter}>
+                  <Pressable style={styles.primaryButton} onPress={startAssessmentForPatient}>
+                    <Text style={styles.primaryButtonText}>HiCardi 적용 사정 시작하기</Text>
+                  </Pressable>
+                </View>
+              </>
+            ) : null}
+          </View>
         </View>
-        <Text style={styles.summary}>{summary}</Text>
-        <Pressable style={styles.primaryButton} onPress={goSetup}>
-          <Text style={styles.primaryButtonText}>초기 세팅으로 이동</Text>
-        </Pressable>
-      </Section>
+      </Modal>
     </View>
   );
 }
-
-type CriteriaScreenProps = React.ComponentProps<typeof CriteriaScreen>;
 
 function PatientsScreen({
   patients,
@@ -886,6 +1016,7 @@ function PatientsScreen({
   toggleDemoAnomalyMode,
   patientAlertStates,
   acknowledgePatientAnomaly,
+  updatePatientTargets,
   blinkOn,
   reduceMotion,
 }: {
@@ -899,6 +1030,7 @@ function PatientsScreen({
   toggleDemoAnomalyMode: (enabled: boolean) => void;
   patientAlertStates: Record<string, PatientAlertState>;
   acknowledgePatientAnomaly: (patientId: string) => void;
+  updatePatientTargets: (patientId: string, targets: PatientTargets) => void;
   blinkOn: boolean;
   reduceMotion: boolean;
 }) {
@@ -906,7 +1038,11 @@ function PatientsScreen({
 
   return (
     <View style={styles.screen}>
-      <Notice title="DEMO DATA / 실제 환자 데이터 아님" text={demoNotice} tone="blue" />
+      <Notice
+        title={`현재 데이터 소스: ${CURRENT_DATA_SOURCE_LABEL}`}
+        text="EMR 연동 환자 목록 예시입니다. 실제 환자 데이터가 아닌 시연용 더미 데이터입니다. 본 프로토타입은 실제 EMR과 연결되어 있지 않습니다."
+        tone="blue"
+      />
       <DemoAnomalyToggle enabled={isDemoAnomalyMode} onToggle={toggleDemoAnomalyMode} />
       {isDemoAnomalyMode && (
         <View style={styles.anomalyModeBadge}>
@@ -1012,89 +1148,21 @@ function PatientsScreen({
                       )}
                     </View>
                   )}
-                  <Notice
-                    title="시연용 임시 상태 로직"
-                    text="생체정보 기록은 5분마다 실시하는 것으로 가정합니다. HR, SpO2는 환자등록 화면의 환자별 Target 값을 우선 사용하고, RR·Skin Temp는 참고용 이상 표시만 남깁니다. 실제 임상 기준이 아닙니다."
-                    tone="warning"
-                  />
-                  <View style={styles.targetSummary}>
-                    <Text style={styles.targetSummaryText}>
-                      알림 Target 예시: HR {patient.targets.hrMin}-{patient.targets.hrMax} bpm · SpO2 {patient.targets.spo2Min}-{patient.targets.spo2Max}% / RR, Skin Temp는 참고 수치만 빨간색으로 표시합니다.
-                    </Text>
-                  </View>
+                  <PatientTargetFields targets={patient.targets} setTargets={(targets) => updatePatientTargets(patient.id, targets)} />
                   <VitalSignsHistoryChart />
                   <PatientVitalsScreen
                     patientName={patient.name}
                     roomBed={`${patient.room}${patient.bed ? `-${patient.bed}` : ''}`}
                     reason={patient.applicationReason || getPatientCategorySummary(patient)}
                   />
+                  <Pressable style={styles.secondaryButton} onPress={() => toggleExpandedPatient(patient.id)}>
+                    <Text style={styles.secondaryButtonText}>닫기</Text>
+                  </Pressable>
                 </View>
               )}
             </View>
           );
         })}
-      </Section>
-    </View>
-  );
-}
-
-function SetupScreen({
-  setupDone,
-  setSetupDone,
-  patientForm,
-  setPatientForm,
-  applicator,
-  setApplicator,
-  addSetupPatient,
-}: {
-  setupDone: string[];
-  setSetupDone: React.Dispatch<React.SetStateAction<string[]>>;
-  patientForm: CriteriaScreenProps['patientForm'];
-  setPatientForm: React.Dispatch<React.SetStateAction<CriteriaScreenProps['patientForm']>>;
-  applicator: string;
-  setApplicator: (value: string) => void;
-  addSetupPatient: () => void;
-}) {
-  const complete = setupDone.length === setupSteps.length;
-  return (
-    <View style={styles.screen}>
-      <Notice
-        title="초기 세팅 안내 임시안"
-        text="본 초기 세팅 안내는 임시안입니다. 실제 사용 시 제조사 지침과 병동 프로토콜을 우선 확인해야 합니다."
-        tone="warning"
-      />
-      <Section title="세팅 대상">
-        <View style={styles.twoCols}>
-          <Field label="환자명 또는 이니셜" value={patientForm.name} onChangeText={(name) => setPatientForm((p) => ({ ...p, name }))} />
-          <Field label="병실" value={patientForm.room} onChangeText={(room) => setPatientForm((p) => ({ ...p, room }))} />
-          <Field label="침상" value={patientForm.bed} onChangeText={(bed) => setPatientForm((p) => ({ ...p, bed }))} />
-          <Field label="적용자 이름 또는 이니셜" value={applicator} onChangeText={setApplicator} />
-        </View>
-      </Section>
-      <Section title="Step-by-Step 가이드">
-        {setupSteps.map((step, index) => {
-          const selected = setupDone.includes(step);
-          return (
-            <Pressable
-              key={step}
-              style={[styles.stepRow, selected && styles.stepRowDone]}
-              onPress={() =>
-                setSetupDone((current) => (current.includes(step) ? current.filter((item) => item !== step) : [...current, step]))
-              }
-            >
-              <View style={[styles.fakeCheck, selected && styles.fakeCheckActive]}>
-                <Text style={styles.fakeCheckText}>{selected ? '✓' : ''}</Text>
-              </View>
-              <Text style={styles.stepText}>
-                {index + 1}. {step}
-              </Text>
-              <Badge text="임시안" compact />
-            </Pressable>
-          );
-        })}
-        <Pressable style={[styles.primaryButton, !complete && styles.disabledButton]} onPress={addSetupPatient} disabled={!complete}>
-          <Text style={styles.primaryButtonText}>{complete ? '세팅 완료 및 적용 환자 현황에 추가' : '모든 필수 항목 체크 후 활성화'}</Text>
-        </Pressable>
       </Section>
     </View>
   );
@@ -1115,10 +1183,10 @@ function PatientTargetFields({
   return (
     <View style={styles.targetCard}>
       <View style={styles.rowBetween}>
-        <Text style={styles.targetTitle}>환자별 Target 설정</Text>
+        <Text style={styles.targetTitle}>시연용 알림 범위 설정</Text>
         <Badge text="시연용 설정" compact />
       </View>
-      <Text style={styles.targetCaption}>Target 값은 프로토타입 시연용 설정입니다. 실제 임상 기준으로 사용하지 마세요.</Text>
+      <Text style={styles.targetCaption}>알림 범위는 프로토타입 시연용 설정입니다. 실제 임상 기준으로 사용하지 마세요.</Text>
       <View style={styles.targetGrid}>
         <Field label="HR min (bpm)" value={`${targets.hrMin}`} onChangeText={(value) => updateNumber('hrMin', value)} keyboardType="numeric" />
         <Field label="HR max (bpm)" value={`${targets.hrMax}`} onChangeText={(value) => updateNumber('hrMax', value)} keyboardType="numeric" />
@@ -1135,33 +1203,90 @@ function ManualScreen({
   setSearch,
   saveSearch,
   searchHistory,
-  detail,
-  setDetail,
   favorites,
   setFavorites,
+  scrollToY,
 }: {
   search: string;
   setSearch: (value: string) => void;
   saveSearch: (value: string) => void;
   searchHistory: string[];
-  detail: string | null;
-  setDetail: (value: string | null) => void;
   favorites: string[];
   setFavorites: React.Dispatch<React.SetStateAction<string[]>>;
+  scrollToY: (y: number) => void;
 }) {
-  const items = manualItems
-    .filter((item) => item.includes(search) || item.toLowerCase().includes(search.toLowerCase()))
-    .sort((a, b) => Number(favorites.includes(b)) - Number(favorites.includes(a)));
+  const [openManualId, setOpenManualId] = useState<string | null>('overview');
+  const [openFavorites, setOpenFavorites] = useState(false);
+  const [manualHasInteracted, setManualHasInteracted] = useState(false);
+  const [activeTabs, setActiveTabs] = useState<Record<string, string>>({
+    step2: 'pc',
+    step4: 'smart-web',
+    step5: 'pc',
+  });
+  const manualPositionsRef = React.useRef<Record<string, number>>({});
+
+  const normalizedSearch = search.trim().toLowerCase();
+  const filteredSteps = manualSteps
+    .filter((step) => {
+      if (!normalizedSearch) return true;
+      const haystack = [
+        step.title,
+        step.summary ?? '',
+        ...step.sections.flatMap((section) => [section.title ?? '', ...section.body, section.warning ?? '']),
+        ...(step.tabs?.flatMap((tab) => [tab.label, ...tab.body, tab.warning ?? '']) ?? []),
+      ]
+        .join(' ')
+        .toLowerCase();
+      return haystack.includes(normalizedSearch);
+    })
+    .sort((a, b) => Number(favorites.includes(b.id)) - Number(favorites.includes(a.id)));
+  const favoriteSteps = favorites
+    .map((favoriteId) => manualSteps.find((step) => step.id === favoriteId))
+    .filter((step): step is (typeof manualSteps)[number] => Boolean(step));
+
+  const animateAccordion = () => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+  };
+
+  const toggleManual = (id: string) => {
+    animateAccordion();
+    setManualHasInteracted(true);
+    setOpenManualId((prev) => (prev === id ? null : id));
+  };
+
+  const toggleFavorites = () => {
+    animateAccordion();
+    setOpenFavorites((prev) => !prev);
+  };
+
+  const handleToggleFavorite = (event: { stopPropagation?: () => void }, stepId: string) => {
+    event.stopPropagation?.();
+    setFavorites((current) => (current.includes(stepId) ? current.filter((id) => id !== stepId) : [...current, stepId]));
+  };
+
+  const handleFavoritePress = (stepId: string) => {
+    setManualHasInteracted(true);
+    setOpenManualId(stepId);
+    setOpenFavorites(false);
+    const y = manualPositionsRef.current[stepId];
+    if (typeof y === 'number') {
+      scrollToY(Math.max(0, y - 140));
+    }
+  };
+
   return (
     <View style={styles.screen}>
-      <Notice title="간단 매뉴얼 임시안" text={`${temporaryNotice} 제조사 지침과 병동 프로토콜을 우선 확인해야 합니다.`} tone="warning" />
+      <Notice
+        title="HiCardi 퀵 매뉴얼"
+        text="하이카디 적용 전 준비부터 매핑, 환자 적용, 실시간 관찰, 모니터링 종료까지의 핵심 절차를 확인할 수 있습니다."
+        tone="blue"
+      />
       <Section title="매뉴얼 검색">
         <Field
-          label="검색어"
           value={search}
           onChangeText={setSearch}
           onBlur={() => saveSearch(search)}
-          placeholder="연결, 배터리, 알람, EKG, 패치, 종료"
+          placeholder="준비, 매핑, 라이브스튜디오, 종료"
         />
         {searchHistory.length > 0 && (
           <View style={styles.searchHistoryWrap}>
@@ -1183,107 +1308,250 @@ function ManualScreen({
           </View>
         )}
       </Section>
-      {detail ? (
-        <Section title="매뉴얼 상세">
-          <Pressable style={styles.secondaryButton} onPress={() => setDetail(null)}>
-            <Text style={styles.secondaryButtonText}>목록으로 돌아가기</Text>
+
+      <Section title="즐겨찾기">
+        <View style={[styles.favoriteSummaryCard, openFavorites && styles.favoriteSummaryCardActive]}>
+          <Pressable style={styles.favoriteSummaryPressable} onPress={toggleFavorites}>
+            <View style={styles.favoriteSummaryHeader}>
+              <View style={styles.flex}>
+                <Text style={styles.favoriteSummaryTitle}>즐겨찾기 {favoriteSteps.length}개</Text>
+                <Text style={styles.favoriteSummaryText}>별표한 매뉴얼 항목을 빠르게 찾아볼 수 있습니다.</Text>
+              </View>
+              <Text style={styles.manualAccordionChevron}>{openFavorites ? '⌃' : '⌄'}</Text>
+            </View>
           </Pressable>
-          <Detail title={`${detail} - 임시안`} />
-        </Section>
-      ) : (
-        <Section title="카드형 매뉴얼 목록">
-          {items.map((item) => {
-            const favorite = favorites.includes(item);
-            return (
-              <View key={item} style={styles.manualCard}>
-                <Pressable
-                  style={styles.flex}
-                  onPress={() => {
-                    saveSearch(search);
-                    setDetail(item);
-                  }}
-                >
-                  <Text style={styles.cardTitle}>{item}</Text>
-                  <Text style={styles.cardText}>짧은 단계형 임시 안내를 확인합니다.</Text>
-                  <Badge text="임시 매뉴얼 / 추후 확정 예정" />
+          {openFavorites ? (
+            <Pressable style={styles.favoriteSummaryBody} onPress={toggleFavorites}>
+              {favoriteSteps.length ? (
+                favoriteSteps.map((step) => (
+                  <Pressable
+                    key={step.id}
+                    style={styles.favoriteLinkCard}
+                    onPress={(event) => {
+                      event.stopPropagation?.();
+                      handleFavoritePress(step.id);
+                    }}
+                  >
+                    <View style={styles.flex}>
+                      <Text style={styles.favoriteLinkTitle}>{step.title}</Text>
+                      <Text style={styles.favoriteLinkText}>{step.summary}</Text>
+                    </View>
+                    <Text style={styles.favoriteLinkChevron}>›</Text>
+                  </Pressable>
+                ))
+              ) : (
+                <View style={styles.favoriteEmptyCard}>
+                  <Text style={styles.favoriteEmptyStar}>☆</Text>
+                  <Text style={styles.favoriteEmptyTitle}>아직 즐겨찾기한 매뉴얼이 없습니다.</Text>
+                  <Text style={styles.favoriteEmptyText}>자주 확인하는 단계의 별표를 눌러 추가해보세요.</Text>
+                </View>
+              )}
+            </Pressable>
+          ) : null}
+        </View>
+      </Section>
+
+      <Section title="단계별 실무 매뉴얼" caption="카드를 눌러 필요한 단계만 펼쳐 확인합니다.">
+        {filteredSteps.map((step, index) => {
+          const expanded = manualHasInteracted ? openManualId === step.id : step.id === 'overview' || step.id === 'step1';
+          const favorite = favorites.includes(step.id);
+          return (
+            <View
+              key={step.id}
+              style={[styles.manualAccordionCard, expanded && styles.manualAccordionCardActive]}
+              onLayout={(event) => {
+                manualPositionsRef.current[step.id] = event.nativeEvent.layout.y;
+              }}
+            >
+              <View style={styles.manualAccordionHeaderRow}>
+                <Pressable style={styles.manualAccordionHeader} onPress={() => toggleManual(step.id)}>
+                  <View style={styles.manualStepBadge}>
+                    <Text style={styles.manualStepBadgeText}>{index + 1}</Text>
+                  </View>
+                  <View style={styles.flex}>
+                    <Text style={styles.manualAccordionTitle}>{step.title}</Text>
+                    {step.summary ? <Text style={styles.manualAccordionSummary}>{step.summary}</Text> : null}
+                  </View>
+                  <Text style={styles.manualAccordionChevron}>{expanded ? '⌃' : '⌄'}</Text>
                 </Pressable>
                 <Pressable
                   style={[styles.favoriteButton, favorite && styles.favoriteButtonActive]}
-                  onPress={() => setFavorites((current) => (favorite ? current.filter((title) => title !== item) : [...current, item]))}
+                  onPress={(event) => handleToggleFavorite(event, step.id)}
                 >
                   <Text style={styles.favoriteText}>{favorite ? '★' : '☆'}</Text>
                 </Pressable>
               </View>
-            );
-          })}
-        </Section>
-      )}
+              {expanded ? (
+                <Pressable style={styles.manualAccordionBody} onPress={() => toggleManual(step.id)}>
+                  {step.id === 'overview' ? <ManualOverviewStepper /> : null}
+                  {step.sections.map((section, sectionIndex) => (
+                    <ManualSectionBlock key={`${step.id}-${section.title ?? sectionIndex}`} section={section} />
+                  ))}
+                  {step.tabs ? (
+                    <ManualTabbedBlock
+                      stepId={step.id}
+                      tabs={step.tabs}
+                      activeTabId={activeTabs[step.id] ?? step.tabs[0]?.id}
+                      onChangeTab={(tabId) => setActiveTabs((current) => ({ ...current, [step.id]: tabId }))}
+                    />
+                  ) : null}
+                </Pressable>
+              ) : null}
+            </View>
+          );
+        })}
+      </Section>
     </View>
   );
+}
+
+function ManualOverviewStepper() {
+  const flow = [
+    'Step 1. 솔루션 및 의료기기 준비',
+    'Step 2. 환자·의료기기·수신기 매핑',
+    'Step 3. 환자에게 의료기기 적용',
+    'Step 4. 생체정보 실시간 관찰',
+    'Step 5. 매핑 해제 및 모니터링 종료',
+  ];
+
+  return (
+    <View style={styles.manualFlowCard}>
+      {flow.map((item, index) => (
+        <View key={item} style={styles.manualFlowItem}>
+          <View style={styles.manualFlowBadge}>
+            <Text style={styles.manualFlowBadgeText}>{index + 1}</Text>
+          </View>
+          <View style={styles.flex}>
+            <Text style={styles.manualFlowText}>{item}</Text>
+          </View>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function ManualSectionBlock({ section }: { section: ManualStepSection }) {
+  return (
+    <View style={styles.manualContentCard}>
+      {section.title ? <Text style={styles.manualContentTitle}>{section.title}</Text> : null}
+      <View style={styles.manualBulletList}>
+        {section.body.map((item) => (
+          <Text key={item} style={styles.manualBulletText}>
+            {item}
+          </Text>
+        ))}
+      </View>
+      <ManualImageBlock imageKey={section.image} />
+      {section.warning ? (
+        <View style={styles.manualWarningBox}>
+          <Text style={styles.manualWarningTitle}>주의</Text>
+          <Text style={styles.manualWarningText}>{section.warning}</Text>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+function ManualTabbedBlock({
+  stepId,
+  tabs,
+  activeTabId,
+  onChangeTab,
+}: {
+  stepId: string;
+  tabs: ManualTabContent[];
+  activeTabId: string;
+  onChangeTab: (tabId: string) => void;
+}) {
+  const activeTab = tabs.find((item) => item.id === activeTabId) ?? tabs[0];
+
+  return (
+    <View style={styles.manualContentCard}>
+      <View style={styles.manualTabsRow}>
+        {tabs.map((tab) => (
+          <Pressable
+            key={`${stepId}-${tab.id}`}
+            style={[styles.manualTabButton, tab.id === activeTab.id && styles.manualTabButtonActive]}
+            onPress={(event) => {
+              event.stopPropagation?.();
+              onChangeTab(tab.id);
+            }}
+          >
+            <Text style={[styles.manualTabButtonText, tab.id === activeTab.id && styles.manualTabButtonTextActive]}>{tab.label}</Text>
+          </Pressable>
+        ))}
+      </View>
+      <View style={styles.manualBulletList}>
+        {activeTab.body.map((item) => (
+          <Text key={`${activeTab.id}-${item}`} style={styles.manualBulletText}>
+            {item}
+          </Text>
+        ))}
+      </View>
+      <ManualImageBlock imageKey={activeTab.image} />
+      {activeTab.warning ? (
+        <View style={styles.manualWarningBox}>
+          <Text style={styles.manualWarningTitle}>안내</Text>
+          <Text style={styles.manualWarningText}>{activeTab.warning}</Text>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+function ManualImageBlock({ imageKey }: { imageKey?: ManualImageKey }) {
+  if (!imageKey) return null;
+  const source = manualImageAssets[imageKey];
+  if (!source) return null;
+
+  return <Image source={source} style={styles.manualImage} resizeMode="contain" />;
 }
 
 function QaScreen({
   search,
   setSearch,
-  detail,
-  setDetail,
 }: {
   search: string;
   setSearch: (value: string) => void;
-  detail: string | null;
-  setDetail: (value: string | null) => void;
 }) {
-  const filtered = qaItems.filter((item) => item.includes(search) || item.toLowerCase().includes(search.toLowerCase()));
+  const [openFaqId, setOpenFaqId] = useState<string | null>(null);
+  const filtered = faqItems.filter((item) =>
+    `${item.question} ${item.answer}`.toLowerCase().includes(search.trim().toLowerCase()),
+  );
+
+  const toggleFaq = (id: string) => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setOpenFaqId((prev) => (prev === id ? null : id));
+  };
+
   return (
     <View style={styles.screen}>
       <Notice
-        title="Q&A 임시 답변 / 추후 확정 예정"
-        text="실제 대응은 제조사 지침과 병동 프로토콜을 따릅니다. 환자 상태 확인을 우선으로 하는 참고용 흐름입니다."
-        tone="warning"
+        title="FAQ"
+        text="하이카디 사용 중 자주 발생하는 상황과 대처 방법을 확인할 수 있습니다."
+        tone="blue"
       />
-      <Section title="Q&A 검색">
-        <Field label="검색어" value={search} onChangeText={setSearch} placeholder="EKG, HR, RR, 알람, 배터리, 패치, 연결" />
+      <Section title="FAQ 검색">
+        <Field value={search} onChangeText={setSearch} placeholder="병실, 검사실, 라이브스튜디오, EMR, 알람, QR" />
       </Section>
-      {detail ? (
-        <Section title="문제 해결 순서">
-          <Pressable style={styles.secondaryButton} onPress={() => setDetail(null)}>
-            <Text style={styles.secondaryButtonText}>목록으로 돌아가기</Text>
-          </Pressable>
-          <Detail title={`문제 상황: ${detail}`} warning="※ 실제 대응은 제조사 지침과 병동 프로토콜을 따릅니다." />
-        </Section>
-      ) : (
-        <Section title="증상 선택형 Q&A">
-          {filtered.map((item) => (
-            <Pressable key={item} style={styles.qaCard} onPress={() => setDetail(item)}>
-              <Text style={styles.cardTitle}>{item}</Text>
-              <Text style={styles.cardText}>환자 상태 확인 → 기기 상태 확인 → 관리자 문의 순서로 안내합니다.</Text>
-              <Badge text="임시 Q&A / 추후 확정 예정" />
-            </Pressable>
-          ))}
-        </Section>
-      )}
-    </View>
-  );
-}
-
-function Detail({ title, warning }: { title: string; warning?: string }) {
-  const steps = [
-    '환자 상태를 먼저 확인합니다.',
-    '패치 부착 상태와 기기 번호를 확인합니다.',
-    '기기 연결 상태와 배터리 상태를 확인합니다.',
-    '생체정보 표시 여부를 확인합니다.',
-    '해결되지 않으면 담당자 또는 관리자에게 문의합니다.',
-  ];
-  return (
-    <View style={styles.detailCard}>
-      <Text style={styles.detailTitle}>{title}</Text>
-      <Badge text="임시안 / 추후 확정 예정" />
-      {steps.map((step, index) => (
-        <Text key={step} style={styles.detailStep}>
-          {index + 1}. {step}
-        </Text>
-      ))}
-      <Text style={styles.warningText}>{warning ?? '※ 본 내용은 임시안이며 추후 병동 지침과 제조사 지침에 맞게 수정 예정입니다.'}</Text>
+      <Section title="자주 묻는 질문">
+        {filtered.map((item) => {
+          const expanded = openFaqId === item.id;
+          return (
+            <View key={item.id} style={[styles.faqCard, expanded && styles.faqCardActive]}>
+              <Pressable style={styles.faqQuestionRow} onPress={() => toggleFaq(item.id)}>
+                <Text style={styles.faqQuestionText}>Q. {item.question}</Text>
+                <Text style={styles.manualAccordionChevron}>{expanded ? '⌃' : '⌄'}</Text>
+              </Pressable>
+              {expanded ? (
+                <Pressable style={styles.faqAnswerWrap} onPress={() => toggleFaq(item.id)}>
+                  <Text style={styles.faqAnswerText}>A. {item.answer}</Text>
+                </Pressable>
+              ) : null}
+            </View>
+          );
+        })}
+      </Section>
     </View>
   );
 }
@@ -1314,21 +1582,6 @@ function TabIcon({ tab, active }: { tab: Tab; active: boolean }) {
     );
   }
 
-  if (tab === 'setup') {
-    return (
-      <Svg width="24" height="24" viewBox="0 0 24 24">
-        <Circle cx="12" cy="12" r="3" stroke={color} strokeWidth="2" fill="none" />
-        <Path
-          d="M12 4.5v2.2M12 17.3v2.2M19.5 12h-2.2M6.7 12H4.5M17.3 6.7l-1.6 1.6M8.3 15.7l-1.6 1.6M17.3 17.3l-1.6-1.6M8.3 8.3 6.7 6.7"
-          stroke={color}
-          strokeWidth="2"
-          fill="none"
-          strokeLinecap="round"
-        />
-      </Svg>
-    );
-  }
-
   if (tab === 'manual') {
     return (
       <Svg width="24" height="24" viewBox="0 0 24 24">
@@ -1349,11 +1602,10 @@ function TabIcon({ tab, active }: { tab: Tab; active: boolean }) {
 
 function BottomTabs({ active, setActive }: { active: Tab; setActive: (tab: Tab) => void }) {
   const tabs: { id: Tab; label: string }[] = [
-    { id: 'criteria', label: '환자등록' },
+    { id: 'criteria', label: '적용 평가' },
     { id: 'patients', label: '환자 현황' },
-    { id: 'setup', label: '초기 세팅' },
     { id: 'manual', label: '매뉴얼' },
-    { id: 'qa', label: 'Q&A' },
+    { id: 'qa', label: 'FAQ' },
   ];
   return (
     <View style={styles.tabBar}>
@@ -1378,7 +1630,7 @@ function Field({
   multiline,
   keyboardType,
 }: {
-  label: string;
+  label?: string;
   value: string;
   onChangeText: (value: string) => void;
   onBlur?: () => void;
@@ -1388,7 +1640,7 @@ function Field({
 }) {
   return (
     <View style={styles.field}>
-      <Text style={styles.label}>{label}</Text>
+      {label ? <Text style={styles.label}>{label}</Text> : null}
       <TextInput
         style={[styles.input, multiline && styles.multilineInput]}
         value={value}
@@ -1403,10 +1655,11 @@ function Field({
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({ title, caption, children }: { title: string; caption?: string; children: React.ReactNode }) {
   return (
     <View style={styles.section}>
       <Text style={styles.sectionTitle}>{title}</Text>
+      {caption ? <Text style={styles.sectionCaption}>{caption}</Text> : null}
       {children}
     </View>
   );
@@ -1655,9 +1908,9 @@ function getDecision(totalScore: number) {
     };
   }
   return {
-    title: '적용 필요성 낮음',
+    title: '일반 관찰',
     color: theme.stable,
-    reason: '0-2점은 시연용 임시 기준에서 적용 필요성이 낮은 범위입니다. 실제 상태 변화는 별도 확인이 필요합니다.',
+    reason: '0-2점은 시연용 임시 기준에서 일반 관찰 범위입니다. 실제 상태 변화는 별도 확인이 필요합니다.',
   };
 }
 
@@ -1668,16 +1921,186 @@ function getIndicationFromPatient(departmentCategory: DepartmentCategory, transp
   return 'icuTransfer';
 }
 
-function getTransplantSubtypeForSave(departmentCategory: DepartmentCategory, transplantSubtype?: TransplantSubtype) {
-  return departmentCategory === 'transplantVascularSurgery' ? transplantSubtype ?? 'kidney' : undefined;
-}
-
 function getPatientCategorySummary(patient: Patient) {
   const category = departmentCategoryLabels[patient.departmentCategory];
   if (patient.departmentCategory === 'transplantVascularSurgery' && patient.transplantSubtype) {
     return `${category} · ${transplantSubtypeLabels[patient.transplantSubtype]}`;
   }
   return category;
+}
+
+function getHicardiStatusLabel(status: Patient['hicardiStatus']) {
+  if (status === 'applied') return '적용 중';
+  if (status === 'candidate') return '적용 후보';
+  if (status === 'ended') return '적용 종료';
+  return '미적용';
+}
+
+function getAssessmentStatusLabel(
+  status: AppPatient['currentHicardiStatus'] | HicardiAssessmentRecord['status'],
+) {
+  if (status === 'candidate') return '적용 검토';
+  if (status === 'mappingPending') return '매핑 대기';
+  if (status === 'monitoring') return '모니터링 중';
+  if (status === 'maintained') return '일반 관찰 유지';
+  if (status === 'ended') return '중단';
+  return '미적용';
+}
+
+function getAssessmentDecisionLabel(decision: HicardiAssessmentRecord['decision']) {
+  if (decision === 'startHicardi') return 'HiCardi 적용 시작';
+  if (decision === 'recommendHicardi') return 'HiCardi 적용 권고';
+  if (decision === 'consultSenior') return '상급자와 협의';
+  if (decision === 'considerStop') return 'HiCardi 중단 고려';
+  if (decision === 'emergencyApply') return '응급상황 예외 적용';
+  return '일반 관찰 유지';
+}
+
+function getDecisionColor(decision: HicardiAssessmentRecord['decision']) {
+  if (decision === 'startHicardi' || decision === 'emergencyApply') return theme.danger;
+  if (decision === 'recommendHicardi' || decision === 'consultSenior') return theme.caution;
+  if (decision === 'considerStop') return '#7A4A00';
+  return theme.stable;
+}
+
+function getNews2BandLabel(band: News2Band) {
+  if (band === 'gte7') return '7점 이상';
+  if (band === 'fiveToSix') return '5-6점';
+  if (band === 'oneToFour') return '1-4점';
+  return '4점 미만';
+}
+
+function countSpecialCriteria(criteria: HicardiSpecialCriteria) {
+  return Object.values(criteria).filter(Boolean).length;
+}
+
+function formatSpecialCriteriaSummary(criteria: HicardiSpecialCriteria) {
+  const labels = [];
+  if (criteria.icuOrEr) labels.push('ICU/ER 경유');
+  if (criteria.highRiskSurgeryOrTransplant) labels.push('고위험 수술 또는 장기이식 수술');
+  if (criteria.age65OrOlder) labels.push('65세 이상');
+  return labels.length ? labels.join(', ') : '해당 없음';
+}
+
+function formatDateTimeKorean(value: string) {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleString('ko-KR', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function formatPopupConsciousness(value: VitalSnapshot['consciousness']) {
+  return value === 'alert' ? 'Alert' : 'New confusion / AVPU';
+}
+
+function getPopupVitalTone(
+  key: 'rr' | 'spo2' | 'oxygen' | 'sbp' | 'hr' | 'consciousness' | 'temperature',
+  vital: VitalSnapshot,
+): 'Normal' | 'Warning' | 'Danger' {
+  if (key === 'spo2') {
+    if (vital.spo2 < 94) return 'Danger';
+    if (vital.spo2 < 96) return 'Warning';
+    return 'Normal';
+  }
+  if (key === 'rr') {
+    if (vital.rr >= 25 || vital.rr <= 8) return 'Danger';
+    if (vital.rr >= 21 || vital.rr <= 11) return 'Warning';
+    return 'Normal';
+  }
+  if (key === 'sbp') {
+    if (vital.sbp <= 90 || vital.sbp >= 220) return 'Danger';
+    if (vital.sbp <= 110) return 'Warning';
+    return 'Normal';
+  }
+  if (key === 'hr') {
+    if (vital.hr <= 40 || vital.hr >= 131) return 'Danger';
+    if (vital.hr <= 50 || vital.hr >= 111) return 'Warning';
+    return 'Normal';
+  }
+  if (key === 'temperature') {
+    if (vital.temperature <= 35.0 || vital.temperature >= 39.1) return 'Danger';
+    if (vital.temperature <= 36.0 || vital.temperature >= 38.1) return 'Warning';
+    return 'Normal';
+  }
+  if (key === 'consciousness') {
+    return vital.consciousness === 'alert' ? 'Normal' : 'Danger';
+  }
+  if (key === 'oxygen') {
+    return vital.oxygen ? 'Warning' : 'Normal';
+  }
+  return 'Normal';
+}
+
+function getPopupVitalItems(vital: VitalSnapshot) {
+  return [
+    { label: 'RR', value: `${vital.rr}회/분`, tone: getPopupVitalTone('rr', vital) },
+    { label: 'SpO₂', value: `${vital.spo2}%`, tone: getPopupVitalTone('spo2', vital) },
+    { label: '산소투여', value: vital.oxygen ? '예' : '아니오', tone: getPopupVitalTone('oxygen', vital) },
+    { label: 'SBP', value: `${vital.sbp} mmHg`, tone: getPopupVitalTone('sbp', vital) },
+    { label: 'HR', value: `${vital.hr}회/분`, tone: getPopupVitalTone('hr', vital) },
+    { label: '의식상태', value: formatPopupConsciousness(vital.consciousness), tone: getPopupVitalTone('consciousness', vital) },
+    { label: '체온', value: `${vital.temperature.toFixed(1)}℃`, tone: getPopupVitalTone('temperature', vital) },
+  ] as const;
+}
+
+function getPopupVitalToneStyle(tone: 'Normal' | 'Warning' | 'Danger') {
+  if (tone === 'Warning') return styles.vitalBadgeWarning;
+  if (tone === 'Danger') return styles.vitalBadgeDanger;
+  return styles.vitalBadgeNormal;
+}
+
+function getDefaultSpecialCriteria(patient: AppPatient, meta: DemoSearchResult['meta']): HicardiSpecialCriteria {
+  const surgeryName = `${meta.recentSurgeryName}`.toUpperCase();
+  const isHighRiskOperation =
+    meta.surgeryDurationMinutes >= 120 ||
+    ['TLTG', 'PPPD', 'PRPD', 'AAA', 'COLECTOMY', 'KT', 'LT'].some((keyword) => surgeryName.includes(keyword));
+  return {
+    icuOrEr: patient.transferSource === 'ICU' || patient.transferSource === 'ER' || patient.transferSource === '타과 ICU',
+    highRiskSurgeryOrTransplant: isHighRiskOperation || patient.departmentCategory === '이식혈관외과',
+    age65OrOlder: (patient.age ?? 0) >= 65,
+  };
+}
+
+function buildAssessmentReasonSummary(
+  patient: AppPatient,
+  news2Result: News2Result,
+  specialCriteria: HicardiSpecialCriteria,
+  finalLabel: string,
+  emergencyApply: boolean,
+  suffix?: string,
+) {
+  const base = `${patient.displayName}(${patient.patientNumber})은/는 NEWS2 ${news2Result.totalScore}점(${getNews2BandLabel(news2Result.band)})이며, 병동 특수 적용 기준은 ${formatSpecialCriteriaSummary(specialCriteria)}입니다. 시연용 평가 결과는 ${finalLabel}입니다.`;
+  const emergency = emergencyApply ? ' 응급상황 예외 적용 흐름이 함께 표시되었습니다.' : '';
+  return `${base}${emergency}${suffix ? ` ${suffix}` : ''}`.trim();
+}
+
+function mapAssessmentStatusToLegacyStatus(status: HicardiAssessmentRecord['status']): Patient['hicardiStatus'] {
+  if (status === 'monitoring') return 'applied';
+  if (status === 'ended') return 'ended';
+  if (status === 'candidate' || status === 'mappingPending' || status === 'maintained') return 'candidate';
+  return 'notApplied';
+}
+
+function mapDepartmentLabelToLegacyCategory(label: AppPatient['departmentCategory']): DepartmentCategory {
+  if (label === '이식혈관외과') return 'transplantVascularSurgery';
+  if (label === '소아외과') return 'pediatricSurgery';
+  if (label === '간담췌외과') return 'hepatobiliaryPancreaticSurgery';
+  if (label === '위장관 외과') return 'gastrointestinalSurgery';
+  if (label === '내분비 외과') return 'endocrineSurgery';
+  return 'icuTransferOther';
+}
+
+function mapTransferLabelToLegacySource(label?: AppPatient['transferSource']): TransferSource {
+  if (label === '수술실') return 'operatingRoom';
+  if (label === 'ICU') return 'icu';
+  if (label === '타과 ICU') return 'otherDepartmentIcu';
+  if (label === '병동 입원') return 'ward';
+  return 'other';
 }
 
 function getDemoAnomalyMetrics(vital: VitalSign, targets: PatientTargets = defaultTargets): VitalMetricName[] {
@@ -1694,28 +2117,8 @@ function getAlertMetrics(vital: VitalSign, targets: PatientTargets = defaultTarg
   return getDemoAnomalyMetrics(vital, targets).filter((metric) => alertMetricNames.includes(metric));
 }
 
-function normalizeTargets(targets?: PatientTargets): PatientTargets {
-  return {
-    ...defaultTargets,
-    ...(targets ?? {}),
-  };
-}
-
 function createVital(patientId: string, hr: number, rr: number, spo2: number, temperature: number, signalQuality: SignalQuality): VitalSign {
-  return {
-    patientId,
-    hr,
-    rr,
-    spo2,
-    temperature,
-    signalQuality,
-    ekgWaveform: createEkgWaveform(),
-    hrTrend: createFiveMinuteHistory(hr, 4, 2),
-    rrTrend: createFiveMinuteHistory(rr, 1.5, 3),
-    spo2Trend: createFiveMinuteHistory(spo2, 0.8, 4),
-    temperatureTrend: createFiveMinuteHistory(temperature, 0.18, 5),
-    isDemoData: true,
-  };
+  return createPatientVitalSnapshot(patientId, hr, rr, spo2, temperature, signalQuality);
 }
 
 function updateCurrentVital(vital: VitalSign, anomalyType?: DemoAnomalyType): VitalSign {
@@ -1816,14 +2219,14 @@ const styles = StyleSheet.create({
     marginTop: 3,
   },
   content: {
-    padding: 14,
+    padding: 16,
     paddingBottom: 96,
   },
   screen: {
-    gap: 12,
+    gap: 14,
   },
   section: {
-    gap: 10,
+    gap: 12,
   },
   sectionTitle: {
     color: theme.text,
@@ -1995,6 +2398,11 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     backgroundColor: theme.card,
     padding: 14,
+    shadowColor: '#12324A',
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 2,
   },
   resultScore: {
     color: theme.text,
@@ -2014,6 +2422,158 @@ const styles = StyleSheet.create({
     lineHeight: 21,
     borderWidth: 1,
     borderColor: theme.border,
+  },
+  searchRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 10,
+  },
+  searchButton: {
+    minWidth: 84,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 8,
+    backgroundColor: theme.secondary,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+  },
+  searchButtonText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '900',
+  },
+  gridTwo: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  toggleGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  toggleCard: {
+    flex: 1,
+    minWidth: 220,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: theme.card,
+    padding: 12,
+    gap: 4,
+  },
+  toggleCardActive: {
+    borderColor: theme.secondary,
+    backgroundColor: theme.secondarySoft,
+  },
+  toggleCardDanger: {
+    borderColor: theme.danger,
+    backgroundColor: '#FFF1F1',
+  },
+  segmentWrapper: {
+    gap: 8,
+  },
+  news2ScoreCard: {
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#B8D3E5',
+    backgroundColor: theme.primarySoft,
+    padding: 12,
+    gap: 4,
+  },
+  news2HeroCard: {
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#B8D3E5',
+    backgroundColor: '#F4FAFD',
+    padding: 16,
+    gap: 8,
+    shadowColor: '#12324A',
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 2,
+  },
+  news2HeroValue: {
+    color: theme.primary,
+    fontSize: 36,
+    fontWeight: '900',
+  },
+  checkListBlock: {
+    gap: 10,
+  },
+  inlineNoticeCard: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#D6E2E8',
+    backgroundColor: '#FFFFFF',
+    padding: 14,
+    gap: 4,
+  },
+  inlineNoticeCardDanger: {
+    borderColor: '#F4B0B0',
+    backgroundColor: '#FFF3F3',
+  },
+  simpleListCard: {
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: theme.card,
+    padding: 12,
+    gap: 8,
+  },
+  resultCardStrong: {
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: theme.primary,
+    backgroundColor: theme.card,
+    padding: 14,
+    gap: 5,
+    shadowColor: '#12324A',
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 2,
+  },
+  startNowCard: {
+    borderRadius: 14,
+    backgroundColor: '#FFF3F3',
+    borderWidth: 1,
+    borderColor: '#F3C4C4',
+    paddingVertical: 24,
+    paddingHorizontal: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  startNowTitle: {
+    color: theme.danger,
+    fontSize: 28,
+    fontWeight: '900',
+    textAlign: 'center',
+  },
+  reassessmentCard: {
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#B8D3E5',
+    backgroundColor: '#FFFFFF',
+    paddingVertical: 20,
+    paddingHorizontal: 18,
+    shadowColor: '#12324A',
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 2,
+  },
+  reassessmentValue: {
+    color: theme.text,
+    fontSize: 22,
+    fontWeight: '900',
+    lineHeight: 30,
+  },
+  actionGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
   },
   primaryButton: {
     alignItems: 'center',
@@ -2043,6 +2603,14 @@ const styles = StyleSheet.create({
   secondaryButtonText: {
     color: theme.primary,
     fontWeight: '800',
+  },
+  historyCard: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: theme.card,
+    padding: 12,
+    gap: 4,
   },
   formButtonRow: {
     flexDirection: 'row',
@@ -2243,12 +2811,17 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
   targetCard: {
-    borderRadius: 8,
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: theme.border,
-    backgroundColor: '#F8FBFC',
-    padding: 12,
+    backgroundColor: '#FCFEFF',
+    padding: 14,
     gap: 10,
+    shadowColor: '#12324A',
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 2,
   },
   targetTitle: {
     color: theme.text,
@@ -2602,6 +3175,270 @@ const styles = StyleSheet.create({
     backgroundColor: theme.card,
     padding: 12,
   },
+  manualAccordionCard: {
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: theme.card,
+    padding: 14,
+    gap: 12,
+    shadowColor: '#12324A',
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 2,
+  },
+  manualAccordionCardActive: {
+    borderColor: '#8BC6D7',
+    backgroundColor: '#F9FDFD',
+  },
+  manualAccordionHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+  },
+  manualAccordionHeader: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  manualAccordionTitle: {
+    color: theme.text,
+    fontSize: 17,
+    fontWeight: '900',
+    lineHeight: 24,
+  },
+  manualAccordionSummary: {
+    color: theme.muted,
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: 4,
+  },
+  manualAccordionChevron: {
+    color: theme.primary,
+    fontSize: 24,
+    fontWeight: '700',
+    lineHeight: 24,
+    marginTop: 2,
+  },
+  manualAccordionBody: {
+    gap: 12,
+  },
+  manualStepBadge: {
+    width: 34,
+    height: 34,
+    borderRadius: 999,
+    backgroundColor: theme.primarySoft,
+    borderWidth: 1,
+    borderColor: '#B8D3E5',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 2,
+  },
+  manualStepBadgeText: {
+    color: theme.primary,
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  manualFlowCard: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#DCE9EF',
+    backgroundColor: '#F9FCFD',
+    padding: 14,
+    gap: 10,
+  },
+  manualFlowItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  manualFlowBadge: {
+    width: 28,
+    height: 28,
+    borderRadius: 999,
+    backgroundColor: theme.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  manualFlowBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '900',
+  },
+  manualFlowText: {
+    color: theme.text,
+    fontSize: 14,
+    fontWeight: '800',
+    lineHeight: 20,
+  },
+  manualContentCard: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#DCE9EF',
+    backgroundColor: '#FCFEFF',
+    padding: 14,
+    gap: 10,
+  },
+  manualContentTitle: {
+    color: theme.text,
+    fontSize: 15,
+    fontWeight: '900',
+  },
+  manualBulletList: {
+    gap: 8,
+  },
+  manualBulletText: {
+    color: theme.text,
+    fontSize: 14,
+    lineHeight: 21,
+    fontWeight: '600',
+  },
+  manualTabsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  manualTabButton: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#B8D3E5',
+    backgroundColor: theme.primarySoft,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  manualTabButtonActive: {
+    backgroundColor: theme.primary,
+    borderColor: theme.primary,
+  },
+  manualTabButtonText: {
+    color: theme.primary,
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  manualTabButtonTextActive: {
+    color: '#FFFFFF',
+  },
+  manualImage: {
+    width: '100%',
+    maxHeight: 300,
+    minHeight: 180,
+    borderRadius: 12,
+    backgroundColor: '#F4F8FA',
+    alignSelf: 'center',
+  },
+  manualWarningBox: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#F3D189',
+    backgroundColor: '#FFF8E8',
+    padding: 12,
+    gap: 6,
+  },
+  manualWarningTitle: {
+    color: '#8A5A00',
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  manualWarningText: {
+    color: '#7A6131',
+    fontSize: 13,
+    lineHeight: 19,
+    fontWeight: '700',
+  },
+  favoriteSummaryCard: {
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#D8E9D7',
+    backgroundColor: '#F6FCF7',
+    padding: 14,
+    gap: 12,
+    shadowColor: '#12324A',
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 1,
+  },
+  favoriteSummaryCardActive: {
+    borderColor: '#BFD8A6',
+    backgroundColor: '#FBFDEA',
+  },
+  favoriteSummaryPressable: {
+    flex: 1,
+  },
+  favoriteSummaryHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  favoriteSummaryTitle: {
+    color: theme.text,
+    fontSize: 17,
+    fontWeight: '900',
+  },
+  favoriteSummaryText: {
+    color: theme.muted,
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: 4,
+  },
+  favoriteSummaryBody: {
+    gap: 10,
+  },
+  favoriteLinkCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E6ECD2',
+    backgroundColor: '#FFFFFF',
+    padding: 12,
+  },
+  favoriteLinkTitle: {
+    color: theme.text,
+    fontSize: 14,
+    fontWeight: '900',
+    lineHeight: 20,
+  },
+  favoriteLinkText: {
+    color: theme.muted,
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 3,
+  },
+  favoriteLinkChevron: {
+    color: theme.primary,
+    fontSize: 24,
+    fontWeight: '700',
+  },
+  favoriteEmptyCard: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E8E0A7',
+    backgroundColor: '#FFFBEA',
+    padding: 16,
+    alignItems: 'center',
+    gap: 6,
+  },
+  favoriteEmptyStar: {
+    color: '#D4A72C',
+    fontSize: 22,
+    fontWeight: '900',
+  },
+  favoriteEmptyTitle: {
+    color: theme.text,
+    fontSize: 14,
+    fontWeight: '900',
+    textAlign: 'center',
+  },
+  favoriteEmptyText: {
+    color: theme.muted,
+    fontSize: 12,
+    lineHeight: 18,
+    textAlign: 'center',
+  },
   searchHistoryWrap: {
     gap: 8,
   },
@@ -2647,6 +3484,46 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: '900',
   },
+  faqCard: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: theme.card,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    gap: 10,
+    shadowColor: '#12324A',
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 1,
+  },
+  faqCardActive: {
+    borderColor: '#8BC6D7',
+    backgroundColor: '#F9FDFD',
+  },
+  faqQuestionRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  faqQuestionText: {
+    flex: 1,
+    color: theme.text,
+    fontSize: 15,
+    fontWeight: '900',
+    lineHeight: 22,
+  },
+  faqAnswerText: {
+    color: theme.muted,
+    fontSize: 14,
+    lineHeight: 21,
+    fontWeight: '600',
+  },
+  faqAnswerWrap: {
+    paddingTop: 2,
+  },
   qaCard: {
     borderRadius: 8,
     borderWidth: 1,
@@ -2678,6 +3555,117 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     marginTop: 10,
     lineHeight: 19,
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.45)',
+    justifyContent: 'center',
+    padding: 16,
+  },
+  modalCard: {
+    maxHeight: '88%',
+    borderRadius: 18,
+    backgroundColor: theme.card,
+    overflow: 'hidden',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.border,
+  },
+  modalTitle: {
+    color: theme.text,
+    fontSize: 20,
+    fontWeight: '900',
+  },
+  modalClose: {
+    color: theme.primary,
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  modalScroll: {
+    maxHeight: 430,
+  },
+  modalScrollContent: {
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 16,
+  },
+  readOnlyInfoCard: {
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: '#F8FBFC',
+    padding: 12,
+    gap: 6,
+  },
+  modalDivider: {
+    height: 1,
+    backgroundColor: theme.border,
+    marginVertical: 6,
+  },
+  popupSectionTitle: {
+    color: theme.text,
+    fontSize: 15,
+    fontWeight: '900',
+    marginTop: 2,
+    marginBottom: 4,
+  },
+  vitalBadgeGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginBottom: 4,
+  },
+  vitalBadgeCard: {
+    flexGrow: 1,
+    flexBasis: 140,
+    minWidth: 132,
+    borderRadius: 10,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 3,
+  },
+  vitalBadgeNormal: {
+    borderColor: '#D6E2E8',
+    backgroundColor: '#FFFFFF',
+  },
+  vitalBadgeWarning: {
+    borderColor: '#F5A623',
+    backgroundColor: '#FFF6E5',
+  },
+  vitalBadgeDanger: {
+    borderColor: '#D64545',
+    backgroundColor: '#FFF1F1',
+  },
+  vitalBadgeLabel: {
+    color: theme.muted,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  vitalBadgeValue: {
+    color: theme.text,
+    fontSize: 15,
+    fontWeight: '900',
+    lineHeight: 20,
+  },
+  popupBadgeWrap: {
+    alignSelf: 'flex-start',
+    marginTop: 6,
+  },
+  stickyModalFooter: {
+    borderTopWidth: 1,
+    borderTopColor: theme.border,
+    backgroundColor: theme.card,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 16,
   },
   tabBar: {
     position: 'absolute',

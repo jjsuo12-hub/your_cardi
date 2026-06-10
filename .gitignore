@@ -3,6 +3,8 @@ web-build/
 node_modules/
 .expo/
 .expo-shared/
+.expo-web*.log
+.expo-web-session*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
