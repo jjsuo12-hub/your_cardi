@@ -3,7 +3,6 @@ import {
   AccessibilityInfo,
   Image,
   LayoutAnimation,
-  Modal,
   Platform,
   Pressable,
   SafeAreaView,
@@ -211,7 +210,7 @@ export default function App() {
   const [isDemoAnomalyMode, setIsDemoAnomalyMode] = useState(false);
   const [anomalyTypes, setAnomalyTypes] = useState<Record<string, DemoAnomalyType>>({});
   const [patientAlertStates, setPatientAlertStates] = useState<Record<string, PatientAlertState>>({});
-  const [expandedPatientId, setExpandedPatientId] = useState<string | null>(bootstrapSelectedPatientId || null);
+  const [expandedPatientId, setExpandedPatientId] = useState<string | null>(null);
   const [blinkOn, setBlinkOn] = useState(true);
   const [reduceMotion, setReduceMotion] = useState(false);
   const [manualSearch, setManualSearch] = useState('');
@@ -220,7 +219,6 @@ export default function App() {
   const [favorites, setFavorites] = useState<string[]>([]);
   const [patientSearchNumber, setPatientSearchNumber] = useState('');
   const [searchFeedback, setSearchFeedback] = useState<string | null>(null);
-  const [isPatientSearchModalVisible, setIsPatientSearchModalVisible] = useState(false);
   const [searchedPatientResult, setSearchedPatientResult] = useState<DemoSearchResult | null>(null);
   const [searchedHicardiVital, setSearchedHicardiVital] = useState<VitalSnapshot | null>(null);
   const [assessmentPatient, setAssessmentPatient] = useState<DemoSearchResult | null>(null);
@@ -291,7 +289,7 @@ export default function App() {
       const nextPatients = wardPatients.map((patient) => mapWardPatientToLegacyPatient(patient as WardPatient & { indication?: HicardiIndication }));
       setPatients(nextPatients);
       setSelectedPatientId((current) => current || nextPatients[0]?.id || '');
-      setExpandedPatientId((current) => current ?? nextPatients[0]?.id ?? null);
+      setExpandedPatientId((current) => (current && nextPatients.some((patient) => patient.id === current) ? current : null));
 
       const vitalEntries = await Promise.all(
         wardPatients.map(async (patient) => {
@@ -356,9 +354,7 @@ export default function App() {
     return () => clearInterval(timer);
   }, []);
 
-  const selectedPatient = patients.find((patient) => patient.id === selectedPatientId) ?? patients[0];
   const appliedPatients = patients.filter((patient) => patient.hicardiStatus === 'applied');
-  const selectedAppliedPatient = appliedPatients.find((patient) => patient.id === selectedPatientId) ?? appliedPatients[0] ?? selectedPatient;
   const assessmentNews2Result = useMemo<News2Result | null>(
     () => (assessmentInput ? calculateNews2(assessmentInput) : null),
     [assessmentInput],
@@ -393,7 +389,6 @@ export default function App() {
       setSearchFeedback('환자번호를 입력하세요.');
       setSearchedPatientResult(null);
       setSearchedHicardiVital(null);
-      setIsPatientSearchModalVisible(false);
       return;
     }
 
@@ -402,7 +397,6 @@ export default function App() {
       setSearchFeedback('해당 환자번호와 일치하는 EMR 연동 환자 정보가 없습니다. 본 앱은 시연용 더미 데이터만 제공합니다.');
       setSearchedPatientResult(null);
       setSearchedHicardiVital(null);
-      setIsPatientSearchModalVisible(false);
       return;
     }
 
@@ -410,7 +404,6 @@ export default function App() {
     setSearchedHicardiVital(latestPayload ? mapRawHicardiPayloadToVitalSnapshot(normalized, latestPayload) : null);
     setSearchedPatientResult(result);
     setSearchFeedback(null);
-    setIsPatientSearchModalVisible(true);
   };
 
   const startAssessmentForPatient = () => {
@@ -419,7 +412,6 @@ export default function App() {
     setAssessmentInput(mapVitalSnapshotToNews2Input(searchedPatientResult.vital));
     setSpecialCriteria(getDefaultSpecialCriteria(searchedPatientResult.patient, searchedPatientResult.meta));
     setEmergencyApply(false);
-    setIsPatientSearchModalVisible(false);
   };
 
   const updateSpecialCriterion = (key: keyof HicardiSpecialCriteria) => {
@@ -696,8 +688,6 @@ export default function App() {
               searchFeedback={searchFeedback}
               searchedPatientResult={searchedPatientResult}
               searchedHicardiVital={searchedHicardiVital}
-              isPatientSearchModalVisible={isPatientSearchModalVisible}
-              setIsPatientSearchModalVisible={setIsPatientSearchModalVisible}
               startAssessmentForPatient={startAssessmentForPatient}
               assessmentPatient={assessmentPatient}
               specialCriteria={specialCriteria}
@@ -719,8 +709,6 @@ export default function App() {
           {tab === 'patients' && (
             <PatientsScreen
               patients={appliedPatients}
-              selectedPatient={selectedAppliedPatient}
-              selectedVital={vitals[selectedAppliedPatient.id]}
               vitals={vitals}
               expandedPatientId={expandedPatientId}
               toggleExpandedPatient={toggleExpandedPatient}
@@ -759,8 +747,6 @@ function CriteriaScreen({
   searchFeedback,
   searchedPatientResult,
   searchedHicardiVital,
-  isPatientSearchModalVisible,
-  setIsPatientSearchModalVisible,
   startAssessmentForPatient,
   assessmentPatient,
   specialCriteria,
@@ -780,8 +766,6 @@ function CriteriaScreen({
   searchFeedback: string | null;
   searchedPatientResult: DemoSearchResult | null;
   searchedHicardiVital: VitalSnapshot | null;
-  isPatientSearchModalVisible: boolean;
-  setIsPatientSearchModalVisible: React.Dispatch<React.SetStateAction<boolean>>;
   startAssessmentForPatient: () => void;
   assessmentPatient: DemoSearchResult | null;
   specialCriteria: HicardiSpecialCriteria;
@@ -797,79 +781,115 @@ function CriteriaScreen({
 }) {
   const isDirectStart = Boolean(news2Result && news2Result.totalScore >= 7 && assessmentDecision);
   const nextReassessmentLabel = assessmentDecision?.nextReassessmentLabel ?? '평가 후 재확인';
+  const searchedPatient = searchedPatientResult?.patient;
+  const searchedVital = searchedPatientResult?.vital;
+  const showPatientSummary = Boolean(searchedPatientResult);
+  const showAssessment = Boolean(assessmentPatient && news2Result && assessmentDecision);
+  const currentStep = showAssessment ? 4 : showPatientSummary ? 2 : 1;
+  const news2Rows = searchedVital ? getPopupVitalItems(searchedVital) : [];
+
   return (
-    <View style={styles.screen}>
-      <Notice
-        title={`현재 데이터 소스: ${CURRENT_DATA_SOURCE_LABEL}`}
-        text="본 화면은 실제 EMR과 연결되어 있지 않은 시연용 프로토타입입니다. 환자 정보와 생체정보는 미리 생성된 더미 데이터입니다."
-        tone="blue"
+    <View style={[styles.screen, styles.criteriaScreen]}>
+      <ScreenHeader
+        title="HiCardi 적용 평가"
+        description="환자검색부터 NEWS2, 병동 특수 기준, 적용 결과까지 단계별로 확인합니다."
+        right={<DemoBadge text={`DEMO · ${CURRENT_DATA_SOURCE_LABEL} / 실제 EMR·HiCardi 미연결`} />}
       />
-      <Section title="HiCardi 적용 평가" caption="환자번호 검색을 통해 EMR 연동 환자 정보를 불러온 뒤, NEWS2와 8A 병동 특수 적용 기준을 바탕으로 HiCardi 적용 여부를 평가합니다.">
-        <Badge text="시연용 프로토타입 / 실제 EMR 연동 아님 / 실제 의료 판단 대체 아님" />
-        <Text style={styles.helperText}>예시 환자번호: P-240601, P-240602, P-240603, P-240604</Text>
-        <View style={styles.searchRow}>
-          <View style={styles.flex}>
-            <Field
-              label="환자번호 검색"
-              value={patientSearchNumber}
-              onChangeText={setPatientSearchNumber}
-              onBlur={onSearch}
-              placeholder="환자번호를 입력하세요"
-            />
-          </View>
-          <Pressable style={styles.searchButton} onPress={onSearch}>
+
+      <StepProgress
+        currentStep={currentStep}
+        steps={['환자검색', '정보확인', 'NEWS2', '결과']}
+      />
+
+      <SectionCard title="1. 환자번호 검색" caption="예시: P-240601, P-240602, P-240603, P-240604">
+        <View style={styles.criteriaSearchBlock}>
+          <Field
+            label="환자번호"
+            value={patientSearchNumber}
+            onChangeText={setPatientSearchNumber}
+            onBlur={onSearch}
+            placeholder="환자번호를 입력하세요"
+          />
+          <Pressable style={styles.searchButtonLarge} onPress={onSearch}>
             <Text style={styles.searchButtonText}>검색</Text>
           </Pressable>
         </View>
         {searchFeedback ? <Text style={styles.warningText}>{searchFeedback}</Text> : null}
-      </Section>
+      </SectionCard>
 
-      {assessmentPatient ? (
-        <>
-          <Section title="환자 요약 카드" caption="EMR 더미 데이터 기반으로 자동 채워진 평가 시작 정보입니다.">
-            <View style={styles.targetCard}>
-              <Text style={styles.cardTitle}>{assessmentPatient.patient.displayName}</Text>
-              <Text style={styles.cardText}>환자번호: {assessmentPatient.patient.patientNumber}</Text>
-              <Text style={styles.cardText}>병실/침상: {assessmentPatient.patient.room}-{assessmentPatient.patient.bed}</Text>
-              <Text style={styles.cardText}>진료과: {assessmentPatient.patient.departmentCategory}</Text>
-              <Text style={styles.cardText}>POD: {assessmentPatient.patient.pod ?? '-'}</Text>
-              <Text style={styles.cardText}>전동 출처: {assessmentPatient.patient.transferSource ?? '-'}</Text>
-              <Text style={styles.cardText}>최근 V/S 측정 시각: {formatDateTimeKorean(assessmentPatient.vital.measuredAt)}</Text>
-              <Text style={styles.cardText}>현재 HiCardi 상태: {getAssessmentStatusLabel(assessmentPatient.patient.currentHicardiStatus)}</Text>
-              <Badge text="EMR 더미 데이터 / read-only 환자 정보" />
+      {showPatientSummary && searchedPatient && searchedVital ? (
+        <SectionCard title="2. EMR 환자정보 확인" caption="핵심 정보만 먼저 보여주고, 세부 정보는 접어둡니다.">
+          <View style={styles.summaryHeroCard}>
+            <View style={styles.rowBetween}>
+              <View style={styles.flex}>
+                <Text style={styles.summaryHeroTitle}>{searchedPatient.displayName}</Text>
+                <Text style={styles.summaryHeroMeta}>
+                  환자번호 {searchedPatient.patientNumber} · {searchedPatient.room}-{searchedPatient.bed}
+                </Text>
+              </View>
+              <StatusChip label={getAssessmentStatusLabel(searchedPatient.currentHicardiStatus)} tone="neutral" />
             </View>
-          </Section>
+            <View style={styles.summaryInfoGrid}>
+              <KeyValue label="진료과" value={searchedPatient.departmentCategory} />
+              <KeyValue label="POD" value={`${searchedPatient.pod ?? '-'}`} />
+              <KeyValue label="전동 출처" value={searchedPatient.transferSource ?? '-'} />
+              <KeyValue label="측정 시각" value={formatDateTimeKorean(searchedVital.measuredAt)} />
+            </View>
+            <CurrentVitalsStrip
+              items={[
+                { label: 'HR', value: `${searchedVital.hr}`, unit: 'bpm', tone: getMetricTone('HR', searchedVital, defaultTargets) },
+                { label: 'RR', value: `${searchedVital.rr}`, unit: '/min', tone: getMetricTone('RR', searchedVital, defaultTargets) },
+                { label: 'SpO2', value: `${searchedVital.spo2}`, unit: '%', tone: getMetricTone('SpO2', searchedVital, defaultTargets) },
+                { label: 'Skin Temp', value: searchedVital.temperature.toFixed(1), unit: '°C', tone: getMetricTone('SkinTemp', searchedVital, defaultTargets) },
+              ]}
+            />
+          </View>
 
-          <Section title="NEWS2 자동 계산" caption="NEWS2는 임상 판단을 보조하는 도구이며, 실제 임상 판단을 대체하지 않습니다.">
-            <Text style={styles.helperText}>최근 EMR 더미 생체정보를 기준으로 자동 계산된 총점만 표시합니다.</Text>
-            {news2Result ? (
-              <View style={styles.news2HeroCard}>
-                <View style={styles.rowBetween}>
-                  <Text style={styles.resultTitle}>NEWS2 총점</Text>
-                  <Text style={styles.news2HeroValue}>{news2Result.totalScore}점</Text>
+          <AccordionCard title="상세 EMR 정보 보기" badge="Read-only">
+            <View style={styles.keyValueList}>
+              <KeyValue label="이식혈관외과 세부" value={searchedPatient.transplantSubtype ? transplantSubtypeLabels[searchedPatient.transplantSubtype] : '-'} />
+              <KeyValue label="최근 수술명" value={searchedPatientResult?.meta.recentSurgeryName ?? '-'} />
+              <KeyValue label="수술시간" value={`${searchedPatientResult?.meta.surgeryDurationMinutes ?? '-'}분`} />
+              <KeyValue label="전신마취" value={searchedPatientResult?.meta.generalAnesthesia ? '예' : '아니오'} />
+              <KeyValue label="기기 번호" value={searchedPatientResult?.meta.deviceNumber ?? '-'} />
+              <KeyValue label="스캐너" value={searchedPatientResult?.meta.scannerId ?? '-'} />
+              {searchedHicardiVital ? (
+                <KeyValue
+                  label="HiCardi 더미 매핑"
+                  value={`HR ${searchedHicardiVital.hr} / RR ${searchedHicardiVital.rr} / SpO₂ ${searchedHicardiVital.spo2}`}
+                />
+              ) : null}
+            </View>
+          </AccordionCard>
+        </SectionCard>
+      ) : null}
+
+      {showAssessment && assessmentPatient && news2Result && assessmentDecision ? (
+        <>
+          <SectionCard title="3. NEWS2 적용 사정" caption="NEWS2 점수와 병동 특수 기준은 분리해 보여줍니다.">
+            <View style={styles.news2HeroCard}>
+              <Text style={styles.resultTitle}>NEWS2 총점</Text>
+              <Text style={styles.news2HeroValue}>{news2Result.totalScore}점</Text>
+              <Text style={styles.cardText}>점수 구간: {getNews2BandLabel(news2Result.band)}</Text>
+            </View>
+
+            <View style={styles.news2RowsCard}>
+              {news2Rows.map((item) => (
+                <View key={item.label} style={styles.news2Row}>
+                  <Text style={styles.news2RowLabel}>{item.label}</Text>
+                  <Text style={styles.news2RowValue}>{item.value}</Text>
+                  <Text style={[styles.news2RowScore, item.tone === 'Danger' && styles.textDanger, item.tone === 'Warning' && styles.textWarning]}>
+                    {getNews2DisplayScore(item.label, news2Result)}점
+                  </Text>
                 </View>
-                <Text style={styles.cardText}>점수 구간: {getNews2BandLabel(news2Result.band)}</Text>
-              </View>
-            ) : null}
-            <Pressable style={[styles.inlineNoticeCard, emergencyApply && styles.inlineNoticeCardDanger]} onPress={() => setEmergencyApply((current) => !current)}>
-              <Text style={styles.cardTitle}>응급상황 예외 적용</Text>
-              <Text style={styles.cardText}>프로토타입 안내용 예외 흐름입니다. 실제 임상 결정을 대체하지 않습니다.</Text>
-            </Pressable>
-          </Section>
+              ))}
+            </View>
 
-          {isDirectStart ? (
-            <Section title="HiCardi 적용 시작">
-              <View style={styles.startNowCard}>
-                <Text style={styles.startNowTitle}>HiCardi 적용 시작</Text>
-              </View>
-            </Section>
-          ) : (
-            <Section title="8A 병동 HiCardi 적용 판단 알고리즘" caption="병동 특수 적용 기준은 NEWS2 점수에 합산하지 않으며, NEWS2 5–6점 또는 1–4점 환자의 HiCardi 적용 판단을 보조하기 위해 사용합니다.">
-              <Text style={styles.helperText}>입원 시 NEWS2를 측정하고, 8A 병동 특수 기준 해당 여부를 별도로 확인하는 시연용 평가 흐름입니다.</Text>
+            <SectionCard title="병동 특수 적용 기준" caption="NEWS2 총점에 합산하지 않는 별도 판단 보조 기준입니다.">
               <View style={styles.checkListBlock}>
                 {[
                   ['icuOrEr', 'ICU 또는 ER 경유', '입원 전 또는 전동 전 ICU/ER 경유 환자'],
-                  ['highRiskSurgeryOrTransplant', '고위험 수술 또는 장기이식 수술', '전신마취 2시간 이상 또는 8A major operation 예시(TLTG, PPPD, PrPD, AAA, colectomy, KT, LT)'],
+                  ['highRiskSurgeryOrTransplant', '고위험 수술 또는 장기이식 수술', '전신마취 2시간 이상 또는 8A major operation 예시'],
                   ['age65OrOlder', '65세 이상', '입원일 기준 만 65세 이상 환자'],
                 ].map(([key, label, description]) => {
                   const selected = specialCriteria[key as keyof HicardiSpecialCriteria];
@@ -886,129 +906,82 @@ function CriteriaScreen({
                   );
                 })}
               </View>
-              {assessmentDecision ? (
-                <View style={[styles.resultCard, { borderColor: getDecisionColor(assessmentDecision.decision) }]}>
-                  <Text style={[styles.resultTitle, { color: getDecisionColor(assessmentDecision.decision) }]}>{assessmentDecision.finalLabel}</Text>
-                  <Text style={styles.cardText}>{assessmentDecision.description}</Text>
-                  <Text style={styles.cardText}>다음 재평가: {assessmentDecision.nextReassessmentLabel}</Text>
-                </View>
-              ) : null}
-            </Section>
-          )}
+              <Pressable style={[styles.inlineNoticeCard, emergencyApply && styles.inlineNoticeCardDanger]} onPress={() => setEmergencyApply((current) => !current)}>
+                <Text style={styles.cardTitle}>응급상황 예외 적용</Text>
+                <Text style={styles.cardText}>프로토타입 안내용 예외 흐름입니다. 실제 임상 결정을 대체하지 않습니다.</Text>
+              </Pressable>
+            </SectionCard>
+          </SectionCard>
 
-          <Section title="다음 재평가">
-            <View style={styles.reassessmentCard}>
-              <Text style={styles.reassessmentValue}>{nextReassessmentLabel}</Text>
+          <SectionCard title="4. HiCardi 적용 판단 결과">
+            <View style={[styles.resultCardStrong, { borderColor: getDecisionColor(assessmentDecision.decision) }]}>
+              <Text style={[styles.resultHeroLabel, { color: getDecisionColor(assessmentDecision.decision) }]}>{assessmentDecision.finalLabel}</Text>
+              <Text style={styles.resultHeroPatient}>{assessmentPatient.patient.displayName}</Text>
+              <Text style={styles.cardText}>{assessmentDecision.description}</Text>
+              <Text style={styles.resultHeroMeta}>다음 재평가: {nextReassessmentLabel}</Text>
+              {isDirectStart ? <Text style={styles.resultHeroCallout}>NEWS2 7점 이상으로 즉시 적용 시작 흐름이 표시됩니다.</Text> : null}
             </View>
-          </Section>
 
-          {news2Result && assessmentDecision ? (
-            <Section title="평가 결과 카드">
-              <View style={styles.resultCardStrong}>
-                <Text style={styles.cardTitle}>{assessmentPatient.patient.patientNumber}</Text>
-                <Text style={styles.cardText}>평가일시: {formatDateTimeKorean(new Date().toISOString())}</Text>
-                <Text style={styles.cardText}>NEWS2 총점: {news2Result.totalScore}점</Text>
-                <Text style={styles.cardText}>NEWS2 점수 구간: {getNews2BandLabel(news2Result.band)}</Text>
-                {!isDirectStart ? <Text style={styles.cardText}>병동 특수 적용 기준: {formatSpecialCriteriaSummary(specialCriteria)}</Text> : null}
-                <Text style={styles.cardText}>최종 판단: {assessmentDecision.finalLabel}</Text>
-                <Text style={styles.cardText}>다음 재평가: {assessmentDecision.nextReassessmentLabel}</Text>
-                <Text style={styles.cardText}>상태값: {assessmentDecision.recommendedStatus}</Text>
-                <Badge text="시연용 결과 카드 / 실제 임상 판단 대체 아님" />
+            <AccordionCard title="세부 판단 근거 보기" badge="임시 기준">
+              <View style={styles.keyValueList}>
+                <KeyValue label="평가일시" value={formatDateTimeKorean(new Date().toISOString())} />
+                <KeyValue label="NEWS2 총점" value={`${news2Result.totalScore}점`} />
+                <KeyValue label="NEWS2 점수 구간" value={getNews2BandLabel(news2Result.band)} />
+                <KeyValue label="병동 특수 기준" value={formatSpecialCriteriaSummary(specialCriteria)} />
+                <KeyValue label="추천 상태값" value={assessmentDecision.recommendedStatus} />
               </View>
-              <View style={styles.actionGrid}>
-                <Pressable style={styles.secondaryButton} onPress={saveAsCandidate}>
-                  <Text style={styles.secondaryButtonText}>적용 후보로 저장</Text>
-                </Pressable>
-                <Pressable style={styles.secondaryButton} onPress={saveAssessmentOnly}>
-                  <Text style={styles.secondaryButtonText}>평가 기록 저장</Text>
-                </Pressable>
-                <Pressable style={styles.secondaryButton} onPress={resetAssessment}>
-                  <Text style={styles.secondaryButtonText}>초기화</Text>
-                </Pressable>
-              </View>
-            </Section>
-          ) : null}
+            </AccordionCard>
 
-          {assessmentRecords.length ? (
-            <Section title="평가 기록 누적">
-              {assessmentRecords.map((record) => (
-                <View key={record.id} style={styles.historyCard}>
-                  <Text style={styles.cardTitle}>{formatDateTimeKorean(record.assessedAt)}</Text>
-                  <Text style={styles.cardText}>NEWS2 {record.news2Score}점 ({getNews2BandLabel(record.news2Band)})</Text>
-                  <Text style={styles.cardText}>판단: {getAssessmentDecisionLabel(record.decision)}</Text>
-                  <Text style={styles.cardText}>상태값: {record.status}</Text>
-                  <Text style={styles.cardText}>재평가 기준: {record.nextReassessmentLabel ?? '-'}</Text>
+            <AccordionCard title="재평가·중단 기준 보기">
+              <View style={styles.keyValueList}>
+                <KeyValue label="다음 재평가" value={assessmentDecision.nextReassessmentLabel} />
+                <KeyValue label="중단/협의" value={getAssessmentDecisionLabel(assessmentDecision.decision)} />
+              </View>
+            </AccordionCard>
+
+            <View style={styles.actionGrid}>
+              <Pressable style={styles.secondaryButton} onPress={saveAsCandidate}>
+                <Text style={styles.secondaryButtonText}>적용 후보로 저장</Text>
+              </Pressable>
+              <Pressable style={styles.secondaryButton} onPress={saveAssessmentOnly}>
+                <Text style={styles.secondaryButtonText}>평가 기록 저장</Text>
+              </Pressable>
+              <Pressable style={styles.secondaryButton} onPress={resetAssessment}>
+                <Text style={styles.secondaryButtonText}>초기화</Text>
+              </Pressable>
+            </View>
+
+            {assessmentRecords.length ? (
+              <AccordionCard title={`평가 기록 보기 (${assessmentRecords.length})`} badge="누적">
+                <View style={styles.accordionList}>
+                  {assessmentRecords.map((record) => (
+                    <View key={record.id} style={styles.historyCard}>
+                      <Text style={styles.cardTitle}>{formatDateTimeKorean(record.assessedAt)}</Text>
+                      <Text style={styles.cardText}>NEWS2 {record.news2Score}점 ({getNews2BandLabel(record.news2Band)})</Text>
+                      <Text style={styles.cardText}>판단: {getAssessmentDecisionLabel(record.decision)}</Text>
+                      <Text style={styles.cardText}>재평가: {record.nextReassessmentLabel ?? '-'}</Text>
+                    </View>
+                  ))}
                 </View>
-              ))}
-            </Section>
-          ) : null}
+              </AccordionCard>
+            ) : null}
+          </SectionCard>
         </>
       ) : null}
 
-      <Modal visible={isPatientSearchModalVisible} transparent animationType="slide" onRequestClose={() => setIsPatientSearchModalVisible(false)}>
-        <View style={styles.modalBackdrop}>
-          <View style={styles.modalCard}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>EMR 연동 환자 정보</Text>
-              <Pressable onPress={() => setIsPatientSearchModalVisible(false)}>
-                <Text style={styles.modalClose}>닫기</Text>
-              </Pressable>
-            </View>
-            {searchedPatientResult ? (
-              <>
-                <ScrollView style={styles.modalScroll} contentContainerStyle={styles.modalScrollContent}>
-                  <View style={styles.readOnlyInfoCard}>
-                    <Text style={styles.cardText}>환자번호: {searchedPatientResult.patient.patientNumber}</Text>
-                    <Text style={styles.cardText}>환자 표시명: {searchedPatientResult.patient.displayName}</Text>
-                    <Text style={styles.cardText}>병실/침상: {searchedPatientResult.patient.room}-{searchedPatientResult.patient.bed}</Text>
-                    <Text style={styles.cardText}>진료과/환자 대분류: {searchedPatientResult.patient.departmentCategory}</Text>
-                    <Text style={styles.cardText}>이식혈관외과 세부 항목: {searchedPatientResult.patient.transplantSubtype ? transplantSubtypeLabels[searchedPatientResult.patient.transplantSubtype] : '-'}</Text>
-                    <Text style={styles.cardText}>POD: {searchedPatientResult.patient.pod ?? '-'}</Text>
-                    <Text style={styles.cardText}>전동 출처: {searchedPatientResult.patient.transferSource ?? '-'}</Text>
-                    <Text style={styles.cardText}>최근 수술명: {searchedPatientResult.meta.recentSurgeryName}</Text>
-                    <Text style={styles.cardText}>수술시간: {searchedPatientResult.meta.surgeryDurationMinutes}분</Text>
-                    <Text style={styles.cardText}>전신마취 여부: {searchedPatientResult.meta.generalAnesthesia ? '예' : '아니오'}</Text>
-                    <Text style={styles.cardText}>최근 생체정보 측정 시각: {formatDateTimeKorean(searchedPatientResult.vital.measuredAt)}</Text>
-                    <View style={styles.modalDivider} />
-                    <Text style={styles.cardText}>인식 기기 번호: {searchedPatientResult.meta.deviceNumber}</Text>
-                    <Text style={styles.cardText}>인식된 스캐너: {searchedPatientResult.meta.scannerId}</Text>
-                    <View style={styles.modalDivider} />
-                    <Text style={styles.popupSectionTitle}>최근 V/S</Text>
-                    <View style={styles.vitalBadgeGrid}>
-                      {getPopupVitalItems(searchedPatientResult.vital).map((item) => (
-                        <View key={item.label} style={[styles.vitalBadgeCard, getPopupVitalToneStyle(item.tone)]}>
-                          <Text style={styles.vitalBadgeLabel}>{item.label}</Text>
-                          <Text style={styles.vitalBadgeValue}>{item.value}</Text>
-                        </View>
-                      ))}
-                    </View>
-                    <Text style={styles.cardText}>현재 HiCardi 상태: {getAssessmentStatusLabel(searchedPatientResult.patient.currentHicardiStatus)}</Text>
-                    {searchedHicardiVital ? (
-                      <Text style={styles.cardText}>HiCardi 더미 매핑 데이터 예시: HR {searchedHicardiVital.hr} / RR {searchedHicardiVital.rr} / SpO₂ {searchedHicardiVital.spo2}</Text>
-                    ) : null}
-                    <View style={styles.popupBadgeWrap}>
-                      <Badge text="read-only / 시연용 더미 데이터" />
-                    </View>
-                  </View>
-                </ScrollView>
-                <View style={styles.stickyModalFooter}>
-                  <Pressable style={styles.primaryButton} onPress={startAssessmentForPatient}>
-                    <Text style={styles.primaryButtonText}>HiCardi 적용 사정 시작하기</Text>
-                  </Pressable>
-                </View>
-              </>
-            ) : null}
-          </View>
+      {showPatientSummary && !assessmentPatient ? (
+        <View style={styles.floatingActionWrap}>
+          <Pressable style={styles.primaryButton} onPress={startAssessmentForPatient}>
+            <Text style={styles.primaryButtonText}>HiCardi 적용 사정 시작하기</Text>
+          </Pressable>
         </View>
-      </Modal>
+      ) : null}
     </View>
   );
 }
 
 function PatientsScreen({
   patients,
-  selectedPatient,
-  selectedVital,
   vitals,
   expandedPatientId,
   toggleExpandedPatient,
@@ -1021,8 +994,6 @@ function PatientsScreen({
   reduceMotion,
 }: {
   patients: Patient[];
-  selectedPatient: Patient;
-  selectedVital: VitalSign;
   vitals: Record<string, VitalSign>;
   expandedPatientId: string | null;
   toggleExpandedPatient: (id: string) => void;
@@ -1035,13 +1006,22 @@ function PatientsScreen({
   reduceMotion: boolean;
 }) {
   const slots = Array.from({ length: 6 }, (_, index) => patients[index] ?? null);
+  const [openSections, setOpenSections] = useState<Record<string, string | null>>({});
+
+  const togglePatientSection = (patientId: string, sectionId: string) => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setOpenSections((current) => ({
+      ...current,
+      [patientId]: current[patientId] === sectionId ? null : sectionId,
+    }));
+  };
 
   return (
     <View style={styles.screen}>
-      <Notice
-        title={`현재 데이터 소스: ${CURRENT_DATA_SOURCE_LABEL}`}
-        text="EMR 연동 환자 목록 예시입니다. 실제 환자 데이터가 아닌 시연용 더미 데이터입니다. 본 프로토타입은 실제 EMR과 연결되어 있지 않습니다."
-        tone="blue"
+      <ScreenHeader
+        title="적용 환자 현황"
+        description="환자 리스트를 중심으로 보고, 그래프와 상세 정보는 펼쳤을 때만 확인합니다."
+        right={<DemoBadge text="DEMO · 실제 EMR/HiCardi와 연결되지 않음" />}
       />
       <DemoAnomalyToggle enabled={isDemoAnomalyMode} onToggle={toggleDemoAnomalyMode} />
       {isDemoAnomalyMode && (
@@ -1049,7 +1029,7 @@ function PatientsScreen({
           <Text style={styles.anomalyModeBadgeText}>DEMO ANOMALY MODE · 환자 상태를 확인하세요</Text>
         </View>
       )}
-      <Section title="적용 환자 리스트">
+      <SectionCard title="적용 환자 리스트" caption="카드를 눌러 상세 영역을 펼칩니다.">
         {slots.map((patient, index) => {
           const selected = patient?.id === expandedPatientId;
           const vital = patient ? vitals[patient.id] : undefined;
@@ -1066,21 +1046,15 @@ function PatientsScreen({
             <View
               key={patient?.id ?? `empty-${index}`}
               style={[
-                styles.slotCard,
-                selected && styles.slotCardActive,
-                hasAnomaly && styles.slotCardAlertDemo,
-                hasAnomaly && isAcknowledged && styles.slotCardAcknowledged,
+                styles.patientListCard,
+                selected && styles.patientListCardActive,
                 !patient && styles.emptySlotCard,
               ]}
             >
               <Pressable disabled={!patient} onPress={() => patient && toggleExpandedPatient(patient.id)}>
                 <View style={styles.rowBetween}>
                   <Text style={[styles.slotTitle, !patient && styles.emptySlotText]}>Slot {index + 1}</Text>
-                  {hasAnomaly && (
-                    <View style={styles.alertIcon}>
-                      <Text style={styles.alertIconText}>!</Text>
-                    </View>
-                  )}
+                  {patient ? <StatusChip label={statusLabels[patient.status]} tone={patient.status === 'checkRequired' ? 'danger' : patient.status === 'caution' ? 'warning' : 'stable'} /> : null}
                 </View>
 
                 {patient ? (
@@ -1102,19 +1076,19 @@ function PatientsScreen({
                         </View>
                       )}
                     </View>
-                    <Text style={styles.slotMeta}>환자번호: {patient.patientNumber ?? patient.id}</Text>
-                    <Text style={styles.slotMeta}>대분류: {getPatientCategorySummary(patient)}</Text>
-                    <Text style={styles.slotMeta}>전동 출처: {patient.transferSource ? transferSourceLabels[patient.transferSource] : '-'}</Text>
-                    <Text style={styles.slotMeta}>적용 사유: {patient.applicationReason || '시연용 등록'}</Text>
-                    <Text style={styles.slotMeta}>
-                      병실: {patient.room}{patient.bed ? `-${patient.bed}` : ''} · 상태: {hasAnomaly && isAcknowledged ? 'Acknowledged demo' : statusLabels[patient.status]}
-                    </Text>
-                    {hasAnomaly && shouldShowBlinkingAlert && (
-                      <Text style={styles.anomalyMetricSummary}>데모 알림 항목: {alertMetrics.join(', ')}</Text>
-                    )}
-                    {!hasAnomaly && abnormalMetrics.length > 0 && (
-                      <Text style={styles.referenceMetricSummary}>참고 이상 수치: {abnormalMetrics.join(', ')} · 경고 배지는 띄우지 않습니다.</Text>
-                    )}
+                    <View style={styles.patientCardMetaRow}>
+                      <Text style={styles.slotMeta}>{patient.room}{patient.bed ? `-${patient.bed}` : ''}</Text>
+                      <Text style={styles.slotMeta}>연결 {signalLabels[vital?.signalQuality ?? 'good']}</Text>
+                      <Text style={styles.slotMeta}>배터리 {patient.battery}%</Text>
+                    </View>
+                    <CurrentVitalsStrip
+                      items={[
+                        { label: 'HR', value: `${vital?.hr ?? '-'}`, unit: 'bpm', tone: vital ? getMetricTone('HR', vital, patient.targets) : 'neutral' },
+                        { label: 'RR', value: `${vital?.rr ?? '-'}`, unit: '/min', tone: vital ? getMetricTone('RR', vital, patient.targets) : 'neutral' },
+                        { label: 'SpO2', value: `${vital?.spo2 ?? '-'}`, unit: '%', tone: vital ? getMetricTone('SpO2', vital, patient.targets) : 'neutral' },
+                        { label: 'Skin Temp', value: vital ? vital.temperature.toFixed(1) : '-', unit: '°C', tone: vital ? getMetricTone('SkinTemp', vital, patient.targets) : 'neutral' },
+                      ]}
+                    />
                   </View>
                 ) : (
                   <View style={styles.emptySlotInner}>
@@ -1125,15 +1099,11 @@ function PatientsScreen({
 
               {patient && selected && vital && (
                 <View style={styles.expandedVitalsPanel}>
-                  <View style={styles.slideHandle} />
-                  <Text style={styles.expandedTitle}>생체정보 상세</Text>
-                  <Text style={styles.sectionCaption}>선택 환자: {patient.name} / 시연용 임시 기준으로 표시됩니다.</Text>
-                  <View style={styles.metricGrid}>
-                    <VitalMetricCard label="HR" value={`${vital.hr}`} unit="bpm" abnormal={abnormalMetrics.includes('HR')} acknowledged={isAcknowledged} blink={shouldBlink} showAlert={shouldShowBlinkingAlert && alertMetrics.includes('HR')} />
-                    <VitalMetricCard label="SpO2" value={`${vital.spo2}`} unit="%" abnormal={abnormalMetrics.includes('SpO2')} acknowledged={isAcknowledged} blink={shouldBlink} showAlert={shouldShowBlinkingAlert && alertMetrics.includes('SpO2')} />
-                    <VitalMetricCard label="RR" value={`${vital.rr}`} unit="breaths/min" abnormal={abnormalMetrics.includes('RR')} acknowledged={false} blink={false} showAlert={false} />
-                    <VitalMetricCard label="SkinTemp" displayLabel="Skin Temp" value={vital.temperature.toFixed(1)} unit="°C" abnormal={abnormalMetrics.includes('SkinTemp')} acknowledged={false} blink={false} showAlert={false} />
-                  </View>
+                  <Pressable style={styles.expandedVitalsHeader} onPress={() => toggleExpandedPatient(patient.id)}>
+                    <View style={styles.slideHandle} />
+                    <Text style={styles.expandedTitle}>생체정보 상세</Text>
+                    <Text style={styles.sectionCaption}>선택 환자: {patient.name} · 펼친 카드에서 필요한 항목만 확인합니다.</Text>
+                  </Pressable>
                   {hasAnomaly && (shouldShowBlinkingAlert || isAcknowledged) && (
                     <View style={styles.acknowledgePanel}>
                       <Text style={styles.acknowledgeText}>
@@ -1148,22 +1118,72 @@ function PatientsScreen({
                       )}
                     </View>
                   )}
-                  <PatientTargetFields targets={patient.targets} setTargets={(targets) => updatePatientTargets(patient.id, targets)} />
-                  <VitalSignsHistoryChart />
-                  <PatientVitalsScreen
-                    patientName={patient.name}
-                    roomBed={`${patient.room}${patient.bed ? `-${patient.bed}` : ''}`}
-                    reason={patient.applicationReason || getPatientCategorySummary(patient)}
-                  />
-                  <Pressable style={styles.secondaryButton} onPress={() => toggleExpandedPatient(patient.id)}>
-                    <Text style={styles.secondaryButtonText}>닫기</Text>
-                  </Pressable>
+
+                  <AccordionCard
+                    title="현재 생체정보"
+                    badge="Live demo"
+                    expanded={openSections[patient.id] === 'vitals'}
+                    onToggle={() => togglePatientSection(patient.id, 'vitals')}
+                  >
+                    <View style={styles.metricGrid}>
+                      <VitalMetricCard label="HR" value={`${vital.hr}`} unit="bpm" abnormal={abnormalMetrics.includes('HR')} acknowledged={isAcknowledged} blink={shouldBlink} showAlert={shouldShowBlinkingAlert && alertMetrics.includes('HR')} />
+                      <VitalMetricCard label="SpO2" value={`${vital.spo2}`} unit="%" abnormal={abnormalMetrics.includes('SpO2')} acknowledged={isAcknowledged} blink={shouldBlink} showAlert={shouldShowBlinkingAlert && alertMetrics.includes('SpO2')} />
+                      <VitalMetricCard label="RR" value={`${vital.rr}`} unit="breaths/min" abnormal={abnormalMetrics.includes('RR')} acknowledged={false} blink={false} showAlert={false} />
+                      <VitalMetricCard label="SkinTemp" displayLabel="Skin Temp" value={vital.temperature.toFixed(1)} unit="°C" abnormal={abnormalMetrics.includes('SkinTemp')} acknowledged={false} blink={false} showAlert={false} />
+                    </View>
+                  </AccordionCard>
+
+                  <AccordionCard
+                    title="ECG 보기"
+                    badge="시뮬레이션"
+                    expanded={openSections[patient.id] === 'ecg'}
+                    onToggle={() => togglePatientSection(patient.id, 'ecg')}
+                  >
+                    <PatientVitalsScreen
+                      patientName={patient.name}
+                      roomBed={`${patient.room}${patient.bed ? `-${patient.bed}` : ''}`}
+                      reason={patient.applicationReason || getPatientCategorySummary(patient)}
+                    />
+                  </AccordionCard>
+
+                  <AccordionCard
+                    title="Vital Signs History 보기"
+                    badge="그래프"
+                    expanded={openSections[patient.id] === 'history'}
+                    onToggle={() => togglePatientSection(patient.id, 'history')}
+                  >
+                    <VitalSignsHistoryChart />
+                  </AccordionCard>
+
+                  <AccordionCard
+                    title="알림 범위 설정"
+                    badge="설정"
+                    expanded={openSections[patient.id] === 'targets'}
+                    onToggle={() => togglePatientSection(patient.id, 'targets')}
+                  >
+                    <PatientTargetFields targets={patient.targets} setTargets={(targets) => updatePatientTargets(patient.id, targets)} />
+                  </AccordionCard>
+
+                  <AccordionCard
+                    title="적용 기록 보기"
+                    badge="기록"
+                    expanded={openSections[patient.id] === 'record'}
+                    onToggle={() => togglePatientSection(patient.id, 'record')}
+                  >
+                    <View style={styles.keyValueList}>
+                      <KeyValue label="환자번호" value={patient.patientNumber ?? patient.id} />
+                      <KeyValue label="적용 상태" value={getHicardiStatusLabel(patient.hicardiStatus)} />
+                      <KeyValue label="적용 시작" value={patient.hicardiStartTime ?? '-'} />
+                      <KeyValue label="적용 사유" value={patient.applicationReason || '시연용 등록'} />
+                      <KeyValue label="최근 알람" value={patient.latestAlert || '-'} />
+                    </View>
+                  </AccordionCard>
                 </View>
               )}
             </View>
           );
         })}
-      </Section>
+      </SectionCard>
     </View>
   );
 }
@@ -1238,8 +1258,7 @@ function ManualScreen({
         .join(' ')
         .toLowerCase();
       return haystack.includes(normalizedSearch);
-    })
-    .sort((a, b) => Number(favorites.includes(b.id)) - Number(favorites.includes(a.id)));
+    });
   const favoriteSteps = favorites
     .map((favoriteId) => manualSteps.find((step) => step.id === favoriteId))
     .filter((step): step is (typeof manualSteps)[number] => Boolean(step));
@@ -1276,12 +1295,12 @@ function ManualScreen({
 
   return (
     <View style={styles.screen}>
-      <Notice
+      <ScreenHeader
         title="HiCardi 퀵 매뉴얼"
-        text="하이카디 적용 전 준비부터 매핑, 환자 적용, 실시간 관찰, 모니터링 종료까지의 핵심 절차를 확인할 수 있습니다."
-        tone="blue"
+        description="검색과 즐겨찾기를 먼저 두고, 필요한 항목만 펼쳐서 확인합니다."
+        right={<DemoBadge text="임시안 · 추후 확정 예정" />}
       />
-      <Section title="매뉴얼 검색">
+      <SectionCard title="매뉴얼 검색">
         <Field
           value={search}
           onChangeText={setSearch}
@@ -1307,73 +1326,55 @@ function ManualScreen({
             </View>
           </View>
         )}
-      </Section>
+      </SectionCard>
 
-      <Section title="즐겨찾기">
-        <View style={[styles.favoriteSummaryCard, openFavorites && styles.favoriteSummaryCardActive]}>
-          <Pressable style={styles.favoriteSummaryPressable} onPress={toggleFavorites}>
-            <View style={styles.favoriteSummaryHeader}>
+      <AccordionCard title={`즐겨찾기 (${favoriteSteps.length})`} expanded={openFavorites} onToggle={toggleFavorites}>
+        {favoriteSteps.length ? (
+          favoriteSteps.map((step) => (
+            <Pressable
+              key={step.id}
+              style={styles.favoriteLinkCard}
+              onPress={(event) => {
+                event.stopPropagation?.();
+                handleFavoritePress(step.id);
+              }}
+            >
               <View style={styles.flex}>
-                <Text style={styles.favoriteSummaryTitle}>즐겨찾기 {favoriteSteps.length}개</Text>
-                <Text style={styles.favoriteSummaryText}>별표한 매뉴얼 항목을 빠르게 찾아볼 수 있습니다.</Text>
+                <Text style={styles.favoriteLinkTitle}>{step.title}</Text>
+                <Text style={styles.favoriteLinkText}>{step.summary}</Text>
               </View>
-              <Text style={styles.manualAccordionChevron}>{openFavorites ? '⌃' : '⌄'}</Text>
-            </View>
-          </Pressable>
-          {openFavorites ? (
-            <Pressable style={styles.favoriteSummaryBody} onPress={toggleFavorites}>
-              {favoriteSteps.length ? (
-                favoriteSteps.map((step) => (
-                  <Pressable
-                    key={step.id}
-                    style={styles.favoriteLinkCard}
-                    onPress={(event) => {
-                      event.stopPropagation?.();
-                      handleFavoritePress(step.id);
-                    }}
-                  >
-                    <View style={styles.flex}>
-                      <Text style={styles.favoriteLinkTitle}>{step.title}</Text>
-                      <Text style={styles.favoriteLinkText}>{step.summary}</Text>
-                    </View>
-                    <Text style={styles.favoriteLinkChevron}>›</Text>
-                  </Pressable>
-                ))
-              ) : (
-                <View style={styles.favoriteEmptyCard}>
-                  <Text style={styles.favoriteEmptyStar}>☆</Text>
-                  <Text style={styles.favoriteEmptyTitle}>아직 즐겨찾기한 매뉴얼이 없습니다.</Text>
-                  <Text style={styles.favoriteEmptyText}>자주 확인하는 단계의 별표를 눌러 추가해보세요.</Text>
-                </View>
-              )}
+              <Text style={styles.favoriteLinkChevron}>›</Text>
             </Pressable>
-          ) : null}
-        </View>
-      </Section>
+          ))
+        ) : (
+          <View style={styles.favoriteEmptyCard}>
+            <Text style={styles.favoriteEmptyStar}>☆</Text>
+            <Text style={styles.favoriteEmptyTitle}>아직 즐겨찾기한 매뉴얼이 없습니다.</Text>
+            <Text style={styles.favoriteEmptyText}>자주 확인하는 단계의 별표를 눌러 추가해보세요.</Text>
+          </View>
+        )}
+      </AccordionCard>
 
-      <Section title="단계별 실무 매뉴얼" caption="카드를 눌러 필요한 단계만 펼쳐 확인합니다.">
+      <SectionCard title="단계별 실무 매뉴얼" caption="제목만 먼저 보이고, 누르면 내용이 펼쳐집니다.">
         {filteredSteps.map((step, index) => {
-          const expanded = manualHasInteracted ? openManualId === step.id : step.id === 'overview' || step.id === 'step1';
+          const expanded = manualHasInteracted ? openManualId === step.id : false;
           const favorite = favorites.includes(step.id);
           return (
-            <View
+            <AccordionCard
               key={step.id}
-              style={[styles.manualAccordionCard, expanded && styles.manualAccordionCardActive]}
+              title={step.title}
+              summary={step.summary}
+              badge={favorite ? '★' : undefined}
+              expanded={expanded}
+              onToggle={() => toggleManual(step.id)}
               onLayout={(event) => {
                 manualPositionsRef.current[step.id] = event.nativeEvent.layout.y;
               }}
             >
               <View style={styles.manualAccordionHeaderRow}>
-                <Pressable style={styles.manualAccordionHeader} onPress={() => toggleManual(step.id)}>
-                  <View style={styles.manualStepBadge}>
-                    <Text style={styles.manualStepBadgeText}>{index + 1}</Text>
-                  </View>
-                  <View style={styles.flex}>
-                    <Text style={styles.manualAccordionTitle}>{step.title}</Text>
-                    {step.summary ? <Text style={styles.manualAccordionSummary}>{step.summary}</Text> : null}
-                  </View>
-                  <Text style={styles.manualAccordionChevron}>{expanded ? '⌃' : '⌄'}</Text>
-                </Pressable>
+                <View style={styles.manualStepBadge}>
+                  <Text style={styles.manualStepBadgeText}>{index + 1}</Text>
+                </View>
                 <Pressable
                   style={[styles.favoriteButton, favorite && styles.favoriteButtonActive]}
                   onPress={(event) => handleToggleFavorite(event, step.id)}
@@ -1381,26 +1382,22 @@ function ManualScreen({
                   <Text style={styles.favoriteText}>{favorite ? '★' : '☆'}</Text>
                 </Pressable>
               </View>
-              {expanded ? (
-                <Pressable style={styles.manualAccordionBody} onPress={() => toggleManual(step.id)}>
-                  {step.id === 'overview' ? <ManualOverviewStepper /> : null}
-                  {step.sections.map((section, sectionIndex) => (
-                    <ManualSectionBlock key={`${step.id}-${section.title ?? sectionIndex}`} section={section} />
-                  ))}
-                  {step.tabs ? (
-                    <ManualTabbedBlock
-                      stepId={step.id}
-                      tabs={step.tabs}
-                      activeTabId={activeTabs[step.id] ?? step.tabs[0]?.id}
-                      onChangeTab={(tabId) => setActiveTabs((current) => ({ ...current, [step.id]: tabId }))}
-                    />
-                  ) : null}
-                </Pressable>
+              {step.id === 'overview' ? <ManualOverviewStepper /> : null}
+              {step.sections.map((section, sectionIndex) => (
+                <ManualSectionBlock key={`${step.id}-${section.title ?? sectionIndex}`} section={section} />
+              ))}
+              {step.tabs ? (
+                <ManualTabbedBlock
+                  stepId={step.id}
+                  tabs={step.tabs}
+                  activeTabId={activeTabs[step.id] ?? step.tabs[0]?.id}
+                  onChangeTab={(tabId) => setActiveTabs((current) => ({ ...current, [step.id]: tabId }))}
+                />
               ) : null}
-            </View>
+            </AccordionCard>
           );
         })}
-      </Section>
+      </SectionCard>
     </View>
   );
 }
@@ -1526,32 +1523,26 @@ function QaScreen({
 
   return (
     <View style={styles.screen}>
-      <Notice
-        title="FAQ"
-        text="하이카디 사용 중 자주 발생하는 상황과 대처 방법을 확인할 수 있습니다."
-        tone="blue"
+      <ScreenHeader
+        title="Q&A"
+        description="질문만 먼저 보여주고, 답변은 펼쳤을 때만 확인합니다."
+        right={<DemoBadge text="임시 Q&A · 추후 확정 예정" />}
       />
-      <Section title="FAQ 검색">
+      <SectionCard title="Q&A 검색">
         <Field value={search} onChangeText={setSearch} placeholder="병실, 검사실, 라이브스튜디오, EMR, 알람, QR" />
-      </Section>
-      <Section title="자주 묻는 질문">
-        {filtered.map((item) => {
+      </SectionCard>
+      <SectionCard title="자주 묻는 질문">
+        {filtered
+          .sort((a, b) => getFaqPriority(a.question) - getFaqPriority(b.question))
+          .map((item) => {
           const expanded = openFaqId === item.id;
           return (
-            <View key={item.id} style={[styles.faqCard, expanded && styles.faqCardActive]}>
-              <Pressable style={styles.faqQuestionRow} onPress={() => toggleFaq(item.id)}>
-                <Text style={styles.faqQuestionText}>Q. {item.question}</Text>
-                <Text style={styles.manualAccordionChevron}>{expanded ? '⌃' : '⌄'}</Text>
-              </Pressable>
-              {expanded ? (
-                <Pressable style={styles.faqAnswerWrap} onPress={() => toggleFaq(item.id)}>
-                  <Text style={styles.faqAnswerText}>A. {item.answer}</Text>
-                </Pressable>
-              ) : null}
-            </View>
+            <AccordionCard key={item.id} title={item.question} expanded={expanded} onToggle={() => toggleFaq(item.id)}>
+              <Text style={styles.faqAnswerText}>A. {item.answer}</Text>
+            </AccordionCard>
           );
         })}
-      </Section>
+      </SectionCard>
     </View>
   );
 }
@@ -1655,9 +1646,37 @@ function Field({
   );
 }
 
-function Section({ title, caption, children }: { title: string; caption?: string; children: React.ReactNode }) {
+function ScreenHeader({
+  title,
+  description,
+  right,
+}: {
+  title: string;
+  description?: string;
+  right?: React.ReactNode;
+}) {
   return (
-    <View style={styles.section}>
+    <View style={styles.screenHeader}>
+      <View style={styles.flex}>
+        <Text style={styles.screenTitle}>{title}</Text>
+        {description ? <Text style={styles.screenDescription}>{description}</Text> : null}
+      </View>
+      {right}
+    </View>
+  );
+}
+
+function DemoBadge({ text }: { text: string }) {
+  return (
+    <View style={styles.demoBadge}>
+      <Text style={styles.demoBadgeText}>{text}</Text>
+    </View>
+  );
+}
+
+function SectionCard({ title, caption, children }: { title: string; caption?: string; children: React.ReactNode }) {
+  return (
+    <View style={styles.sectionCard}>
       <Text style={styles.sectionTitle}>{title}</Text>
       {caption ? <Text style={styles.sectionCaption}>{caption}</Text> : null}
       {children}
@@ -1665,11 +1684,69 @@ function Section({ title, caption, children }: { title: string; caption?: string
   );
 }
 
-function Notice({ title, text, tone }: { title: string; text: string; tone: 'warning' | 'blue' }) {
+function AccordionCard({
+  title,
+  summary,
+  badge,
+  children,
+  expanded: controlledExpanded,
+  onToggle,
+  onLayout,
+}: {
+  title: string;
+  summary?: string;
+  badge?: string;
+  children: React.ReactNode;
+  expanded?: boolean;
+  onToggle?: () => void;
+  onLayout?: (event: any) => void;
+}) {
+  const [internalExpanded, setInternalExpanded] = useState(false);
+  const expanded = controlledExpanded ?? internalExpanded;
+
+  const handleToggle = () => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    if (onToggle) {
+      onToggle();
+      return;
+    }
+    setInternalExpanded((current) => !current);
+  };
+
   return (
-    <View style={[styles.notice, tone === 'blue' ? styles.noticeBlue : styles.noticeWarning]}>
-      <Text style={styles.noticeTitle}>{title}</Text>
-      <Text style={styles.noticeText}>{text}</Text>
+    <View style={[styles.accordionCard, expanded && styles.accordionCardActive]} onLayout={onLayout}>
+      <Pressable style={styles.accordionHeader} onPress={handleToggle}>
+        <View style={styles.flex}>
+          <View style={styles.accordionTitleRow}>
+            <Text style={styles.accordionTitle}>{title}</Text>
+            {badge ? <StatusChip label={badge} tone="neutral" /> : null}
+          </View>
+          {summary ? <Text style={styles.accordionSummary}>{summary}</Text> : null}
+        </View>
+        <Text style={styles.manualAccordionChevron}>{expanded ? '⌃' : '⌄'}</Text>
+      </Pressable>
+      {expanded ? <View style={styles.accordionBody}>{children}</View> : null}
+    </View>
+  );
+}
+
+function StepProgress({ currentStep, steps }: { currentStep: number; steps: string[] }) {
+  return (
+    <View style={styles.stepProgressWrap}>
+      {steps.map((step, index) => {
+        const isActive = index + 1 <= currentStep;
+        return (
+          <React.Fragment key={step}>
+            <View style={styles.stepItem}>
+              <View style={[styles.stepCircle, isActive && styles.stepCircleActive]}>
+                <Text style={[styles.stepCircleText, isActive && styles.stepCircleTextActive]}>{index + 1}</Text>
+              </View>
+              <Text style={[styles.stepLabel, isActive && styles.stepLabelActive]}>{step}</Text>
+            </View>
+            {index < steps.length - 1 ? <View style={[styles.stepLine, index + 1 < currentStep && styles.stepLineActive]} /> : null}
+          </React.Fragment>
+        );
+      })}
     </View>
   );
 }
@@ -1682,20 +1759,47 @@ function Badge({ text, compact }: { text: string; compact?: boolean }) {
   );
 }
 
-function StatusPill({ status }: { status: PatientStatus }) {
+function StatusChip({ label, tone }: { label: string; tone: 'stable' | 'warning' | 'danger' | 'neutral' }) {
   return (
-    <View style={[styles.statusPill, status === 'stable' && styles.statusStable, status === 'caution' && styles.statusCaution, status === 'checkRequired' && styles.statusDanger]}>
-      <Text style={[styles.statusText, status === 'caution' && styles.statusTextDark]}>{statusLabels[status]}</Text>
+    <View
+      style={[
+        styles.statusPill,
+        tone === 'stable' && styles.statusStable,
+        tone === 'warning' && styles.statusCaution,
+        tone === 'danger' && styles.statusDanger,
+        tone === 'neutral' && styles.statusNeutral,
+      ]}
+    >
+      <Text style={[styles.statusText, (tone === 'warning' || tone === 'neutral') && styles.statusTextDark]}>{label}</Text>
     </View>
   );
 }
 
-function Metric({ label, value, unit }: { label: string; value: string; unit: string }) {
+function CurrentVitalsStrip({
+  items,
+}: {
+  items: { label: string; value: string; unit: string; tone: 'stable' | 'warning' | 'danger' | 'neutral' }[];
+}) {
   return (
-    <View style={styles.metricCard}>
-      <Text style={styles.metricLabel}>{label}</Text>
-      <Text style={styles.metricValue}>{value}</Text>
-      <Text style={styles.metricUnit}>{unit}</Text>
+    <View style={styles.currentVitalsStrip}>
+      {items.map((item) => (
+        <View key={item.label} style={styles.currentVitalsItem}>
+          <Text style={styles.currentVitalsLabel}>{item.label}</Text>
+          <Text style={[styles.currentVitalsValue, item.tone === 'danger' && styles.textDanger, item.tone === 'warning' && styles.textWarning]}>
+            {item.value}
+          </Text>
+          <Text style={styles.currentVitalsUnit}>{item.unit}</Text>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function KeyValue({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.keyValueRow}>
+      <Text style={styles.keyValueLabel}>{label}</Text>
+      <Text style={styles.keyValueValue}>{value}</Text>
     </View>
   );
 }
@@ -2054,6 +2158,53 @@ function getPopupVitalToneStyle(tone: 'Normal' | 'Warning' | 'Danger') {
   return styles.vitalBadgeNormal;
 }
 
+function getMetricTone(
+  metric: VitalMetricName,
+  vital: Pick<VitalSign, 'hr' | 'rr' | 'spo2' | 'temperature'>,
+  targets: PatientTargets,
+): 'stable' | 'warning' | 'danger' | 'neutral' {
+  if (metric === 'HR') {
+    if (vital.hr < 50 || vital.hr > 120) return 'danger';
+    if (vital.hr < targets.hrMin || vital.hr > targets.hrMax) return 'warning';
+    return 'stable';
+  }
+  if (metric === 'RR') {
+    if (vital.rr > 24 || vital.rr < 10) return 'danger';
+    if (vital.rr < targets.rrMin || vital.rr > targets.rrMax) return 'warning';
+    return 'stable';
+  }
+  if (metric === 'SpO2') {
+    if (vital.spo2 < 94) return 'danger';
+    if (vital.spo2 < targets.spo2Min) return 'warning';
+    return 'stable';
+  }
+  if (vital.temperature < 35.5 || vital.temperature > 38.0) return 'danger';
+  if (vital.temperature < targets.skinTempMin || vital.temperature > targets.skinTempMax) return 'warning';
+  return 'stable';
+}
+
+function getNews2DisplayScore(label: string, result: News2Result) {
+  if (label === 'RR') return result.itemScores.rr;
+  if (label === 'SpO₂') return result.itemScores.spo2;
+  if (label === '산소투여') return result.itemScores.oxygen;
+  if (label === 'SBP') return result.itemScores.sbp;
+  if (label === 'HR') return result.itemScores.pulse;
+  if (label === '의식상태') return result.itemScores.consciousness;
+  if (label === '체온') return result.itemScores.temperature;
+  return 0;
+}
+
+function getFaqPriority(question: string) {
+  const priorities = [
+    'ECG 그래프가 보이지 않아요',
+    '환자 목록에 나타나지 않아요',
+    '알람이 계속 떠요',
+    '검사실 이동 시',
+  ];
+  const index = priorities.findIndex((item) => question.includes(item));
+  return index === -1 ? priorities.length + 1 : index;
+}
+
 function getDefaultSpecialCriteria(patient: AppPatient, meta: DemoSearchResult['meta']): HicardiSpecialCriteria {
   const surgeryName = `${meta.recentSurgeryName}`.toUpperCase();
   const isHighRiskOperation =
@@ -2223,19 +2374,149 @@ const styles = StyleSheet.create({
     paddingBottom: 96,
   },
   screen: {
-    gap: 14,
+    gap: 12,
   },
   section: {
     gap: 12,
   },
+  screenHeader: {
+    gap: 8,
+  },
+  screenTitle: {
+    color: theme.primary,
+    fontSize: 22,
+    fontWeight: '900',
+    lineHeight: 28,
+  },
+  screenDescription: {
+    color: theme.muted,
+    fontSize: 14,
+    lineHeight: 21,
+  },
+  demoBadge: {
+    alignSelf: 'flex-start',
+    borderRadius: 999,
+    backgroundColor: theme.primarySoft,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  demoBadgeText: {
+    color: theme.primary,
+    fontSize: 12,
+    fontWeight: '800',
+    lineHeight: 16,
+  },
+  sectionCard: {
+    gap: 12,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: theme.card,
+    padding: 16,
+  },
   sectionTitle: {
     color: theme.text,
-    fontSize: 18,
+    fontSize: 17,
     fontWeight: '800',
+    lineHeight: 24,
   },
   sectionCaption: {
     color: theme.muted,
     fontSize: 14,
+    lineHeight: 21,
+  },
+  accordionCard: {
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: '#FCFEFF',
+    overflow: 'hidden',
+  },
+  accordionCardActive: {
+    borderColor: '#B8D3E5',
+  },
+  accordionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 16,
+  },
+  accordionTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  accordionTitle: {
+    color: theme.text,
+    fontSize: 16,
+    fontWeight: '800',
+    lineHeight: 22,
+  },
+  accordionSummary: {
+    color: theme.muted,
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 4,
+  },
+  accordionBody: {
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+    gap: 12,
+  },
+  stepProgressWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 6,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: theme.card,
+    padding: 12,
+  },
+  stepItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  stepCircle: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#B7C8D5',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+  },
+  stepCircleActive: {
+    backgroundColor: theme.primary,
+    borderColor: theme.primary,
+  },
+  stepCircleText: {
+    color: theme.muted,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  stepCircleTextActive: {
+    color: '#FFFFFF',
+  },
+  stepLabel: {
+    color: theme.muted,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  stepLabelActive: {
+    color: theme.primary,
+  },
+  stepLine: {
+    width: 12,
+    height: 1,
+    backgroundColor: '#C9D8E2',
+  },
+  stepLineActive: {
+    backgroundColor: theme.primary,
   },
   notice: {
     borderWidth: 1,
@@ -2278,7 +2559,8 @@ const styles = StyleSheet.create({
   },
   helperText: {
     color: theme.muted,
-    fontSize: 13,
+    fontSize: 12,
+    lineHeight: 18,
   },
   input: {
     borderWidth: 1,
@@ -2366,9 +2648,61 @@ const styles = StyleSheet.create({
   },
   cardText: {
     color: theme.muted,
-    fontSize: 13,
-    lineHeight: 19,
+    fontSize: 14,
+    lineHeight: 21,
     marginTop: 4,
+  },
+  currentVitalsStrip: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  currentVitalsItem: {
+    minWidth: 84,
+    flex: 1,
+    borderRadius: 12,
+    backgroundColor: '#F7FBFD',
+    padding: 12,
+    gap: 2,
+  },
+  currentVitalsLabel: {
+    color: theme.muted,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  currentVitalsValue: {
+    color: theme.text,
+    fontSize: 18,
+    fontWeight: '900',
+    lineHeight: 24,
+  },
+  currentVitalsUnit: {
+    color: theme.muted,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  keyValueList: {
+    gap: 10,
+  },
+  keyValueRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  keyValueLabel: {
+    width: 96,
+    color: theme.muted,
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 18,
+  },
+  keyValueValue: {
+    flex: 1,
+    color: theme.text,
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: 'right',
   },
   score: {
     color: theme.primary,
@@ -2427,6 +2761,20 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-end',
     gap: 10,
+  },
+  criteriaScreen: {
+    paddingBottom: 84,
+  },
+  criteriaSearchBlock: {
+    gap: 12,
+  },
+  searchButtonLarge: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 12,
+    backgroundColor: theme.secondary,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
   },
   searchButton: {
     minWidth: 84,
@@ -2494,10 +2842,65 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
     elevation: 2,
   },
+  summaryHeroCard: {
+    gap: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#DCE8EF',
+    backgroundColor: '#FCFEFF',
+    padding: 16,
+  },
+  summaryHeroTitle: {
+    color: theme.text,
+    fontSize: 18,
+    fontWeight: '900',
+    lineHeight: 24,
+  },
+  summaryHeroMeta: {
+    color: theme.muted,
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 4,
+  },
+  summaryInfoGrid: {
+    gap: 8,
+  },
   news2HeroValue: {
     color: theme.primary,
     fontSize: 36,
     fontWeight: '900',
+  },
+  news2RowsCard: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: '#FCFEFF',
+    padding: 16,
+    gap: 10,
+  },
+  news2Row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  news2RowLabel: {
+    flex: 1,
+    color: theme.text,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  news2RowValue: {
+    width: 90,
+    color: theme.text,
+    fontSize: 14,
+    textAlign: 'right',
+  },
+  news2RowScore: {
+    width: 42,
+    color: theme.primary,
+    fontSize: 14,
+    fontWeight: '900',
+    textAlign: 'right',
   },
   checkListBlock: {
     gap: 10,
@@ -2534,6 +2937,30 @@ const styles = StyleSheet.create({
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 4 },
     elevation: 2,
+  },
+  resultHeroLabel: {
+    fontSize: 24,
+    fontWeight: '900',
+    lineHeight: 30,
+  },
+  resultHeroPatient: {
+    color: theme.text,
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  resultHeroMeta: {
+    color: theme.text,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  resultHeroCallout: {
+    color: theme.danger,
+    fontSize: 13,
+    fontWeight: '700',
+    lineHeight: 19,
+  },
+  accordionList: {
+    gap: 10,
   },
   startNowCard: {
     borderRadius: 14,
@@ -2574,6 +3001,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 10,
+  },
+  floatingActionWrap: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingTop: 8,
+    backgroundColor: 'rgba(244,248,250,0.96)',
   },
   primaryButton: {
     alignItems: 'center',
@@ -2646,6 +3081,17 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '900',
   },
+  patientListCard: {
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: theme.card,
+    padding: 16,
+    gap: 10,
+  },
+  patientListCardActive: {
+    borderColor: '#B8D3E5',
+  },
   patientCard: {
     padding: 12,
     borderRadius: 8,
@@ -2699,6 +3145,11 @@ const styles = StyleSheet.create({
   slotInfo: {
     marginTop: 8,
     gap: 3,
+  },
+  patientCardMetaRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
   },
   patientNameAlertArea: {
     alignSelf: 'flex-start',
@@ -2797,6 +3248,9 @@ const styles = StyleSheet.create({
     padding: 12,
     gap: 10,
   },
+  expandedVitalsHeader: {
+    gap: 6,
+  },
   slideHandle: {
     alignSelf: 'center',
     width: 48,
@@ -2857,6 +3311,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 5,
   },
+  statusNeutral: {
+    backgroundColor: '#EAF3F9',
+  },
   statusStable: {
     backgroundColor: theme.stable,
   },
@@ -2873,6 +3330,12 @@ const styles = StyleSheet.create({
   },
   statusTextDark: {
     color: theme.text,
+  },
+  textDanger: {
+    color: theme.danger,
+  },
+  textWarning: {
+    color: theme.caution,
   },
   metricGrid: {
     flexDirection: 'row',
