@@ -6,6 +6,9 @@
     "orientation": "portrait",
     "icon": "./assets/icons/appstore.png",
     "platforms": ["ios", "android", "web"],
+    "android": {
+      "package": "com.jjsuo12.yourcadi.wardlite"
+    },
     "web": {
       "bundler": "metro",
       "favicon": "./assets/icons/appstore.png"
