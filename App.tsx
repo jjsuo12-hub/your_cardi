@@ -142,6 +142,7 @@ const appFontFamily =
     : Platform.OS === 'ios'
       ? 'System'
       : 'sans-serif';
+const webTextWrapStyle = Platform.OS === 'web' ? { wordBreak: 'keep-all', overflowWrap: 'break-word' } : {};
 
 function applyDefaultTypography() {
   const defaultStyle = { fontFamily: appFontFamily, letterSpacing: 0 };
@@ -1020,7 +1021,6 @@ function PatientsScreen({
     <View style={styles.screen}>
       <ScreenHeader
         title="적용 환자 현황"
-        description="환자 리스트를 중심으로 보고, 그래프와 상세 정보는 펼쳤을 때만 확인합니다."
         right={<DemoBadge text="DEMO · 실제 EMR/HiCardi와 연결되지 않음" />}
       />
       <DemoAnomalyToggle enabled={isDemoAnomalyMode} onToggle={toggleDemoAnomalyMode} />
@@ -1297,8 +1297,6 @@ function ManualScreen({
     <View style={styles.screen}>
       <ScreenHeader
         title="HiCardi 퀵 매뉴얼"
-        description="검색과 즐겨찾기를 먼저 두고, 필요한 항목만 펼쳐서 확인합니다."
-        right={<DemoBadge text="임시안 · 추후 확정 예정" />}
       />
       <SectionCard title="매뉴얼 검색">
         <Field
@@ -1512,6 +1510,7 @@ function QaScreen({
   setSearch: (value: string) => void;
 }) {
   const [openFaqId, setOpenFaqId] = useState<string | null>(null);
+  const [qrLoadFailed, setQrLoadFailed] = useState(false);
   const filtered = faqItems.filter((item) =>
     `${item.question} ${item.answer}`.toLowerCase().includes(search.trim().toLowerCase()),
   );
@@ -1524,11 +1523,41 @@ function QaScreen({
   return (
     <View style={styles.screen}>
       <ScreenHeader
-        title="Q&A"
-        description="질문만 먼저 보여주고, 답변은 펼쳤을 때만 확인합니다."
-        right={<DemoBadge text="임시 Q&A · 추후 확정 예정" />}
+        title="FAQ"
       />
-      <SectionCard title="Q&A 검색">
+      <SectionCard title="">
+        <Text style={styles.contactCardTitle}>People & Technology 고객센터</Text>
+        <View style={styles.contactCardRow}>
+          <View style={styles.flex}>
+            <View style={styles.contactInfoList}>
+              <View style={styles.contactInfoRow}>
+                <Text style={styles.contactInfoLabel}>고객센터</Text>
+                <Text style={styles.contactInfoValue}>010-2280-3601</Text>
+              </View>
+              <View style={styles.contactInfoRow}>
+                <Text style={styles.contactInfoLabel}>문의 가능 시간</Text>
+                <Text style={styles.contactInfoValue}>09:00 ~ 18:00</Text>
+              </View>
+            </View>
+          </View>
+          <View style={styles.contactQrBlock}>
+            {!qrLoadFailed ? (
+              <Image
+                source={require('./assets/contact/pnt-kakao-qr.png')}
+                style={styles.contactQrImage}
+                resizeMode="contain"
+                onError={() => setQrLoadFailed(true)}
+              />
+            ) : (
+              <View style={styles.contactQrFallback}>
+                <Text style={styles.contactQrFallbackText}>카카오톡 QR 이미지 준비 중</Text>
+              </View>
+            )}
+            <Text style={styles.contactQrLabel}>카카오톡 문의</Text>
+          </View>
+        </View>
+      </SectionCard>
+      <SectionCard title="FAQ 검색">
         <Field value={search} onChangeText={setSearch} placeholder="병실, 검사실, 라이브스튜디오, EMR, 알람, QR" />
       </SectionCard>
       <SectionCard title="자주 묻는 질문">
@@ -1677,7 +1706,7 @@ function DemoBadge({ text }: { text: string }) {
 function SectionCard({ title, caption, children }: { title: string; caption?: string; children: React.ReactNode }) {
   return (
     <View style={styles.sectionCard}>
-      <Text style={styles.sectionTitle}>{title}</Text>
+      {title ? <Text style={styles.sectionTitle}>{title}</Text> : null}
       {caption ? <Text style={styles.sectionCaption}>{caption}</Text> : null}
       {children}
     </View>
@@ -2350,7 +2379,7 @@ const styles = StyleSheet.create({
     backgroundColor: theme.background,
   },
   header: {
-    paddingHorizontal: 18,
+    paddingHorizontal: 16,
     paddingTop: 8,
     paddingBottom: 8,
     minHeight: 54,
@@ -2361,13 +2390,21 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 24,
     fontWeight: '900',
+    flexShrink: 1,
+    flexWrap: 'wrap',
+    maxWidth: '100%',
+    ...webTextWrapStyle,
   },
   headerSubtitle: {
     color: '#DCECF5',
     fontSize: 12,
     fontWeight: '400',
-    lineHeight: 17,
+    lineHeight: 19,
     marginTop: 3,
+    flexShrink: 1,
+    flexWrap: 'wrap',
+    maxWidth: '100%',
+    ...webTextWrapStyle,
   },
   content: {
     padding: 16,
@@ -2387,11 +2424,19 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: '900',
     lineHeight: 28,
+    flexShrink: 1,
+    flexWrap: 'wrap',
+    maxWidth: '100%',
+    ...webTextWrapStyle,
   },
   screenDescription: {
     color: theme.muted,
     fontSize: 14,
     lineHeight: 21,
+    flexShrink: 1,
+    flexWrap: 'wrap',
+    maxWidth: '100%',
+    ...webTextWrapStyle,
   },
   demoBadge: {
     alignSelf: 'flex-start',
@@ -2419,11 +2464,19 @@ const styles = StyleSheet.create({
     fontSize: 17,
     fontWeight: '800',
     lineHeight: 24,
+    flexShrink: 1,
+    flexWrap: 'wrap',
+    maxWidth: '100%',
+    ...webTextWrapStyle,
   },
   sectionCaption: {
     color: theme.muted,
     fontSize: 14,
     lineHeight: 21,
+    flexShrink: 1,
+    flexWrap: 'wrap',
+    maxWidth: '100%',
+    ...webTextWrapStyle,
   },
   accordionCard: {
     borderRadius: 14,
@@ -2452,12 +2505,20 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '800',
     lineHeight: 22,
+    flexShrink: 1,
+    flexWrap: 'wrap',
+    maxWidth: '100%',
+    ...webTextWrapStyle,
   },
   accordionSummary: {
     color: theme.muted,
     fontSize: 12,
     lineHeight: 18,
     marginTop: 4,
+    flexShrink: 1,
+    flexWrap: 'wrap',
+    maxWidth: '100%',
+    ...webTextWrapStyle,
   },
   accordionBody: {
     paddingHorizontal: 16,
@@ -2556,6 +2617,11 @@ const styles = StyleSheet.create({
     color: theme.text,
     fontSize: 13,
     fontWeight: '700',
+    lineHeight: 18,
+    flexShrink: 1,
+    flexWrap: 'wrap',
+    maxWidth: '100%',
+    ...webTextWrapStyle,
   },
   helperText: {
     color: theme.muted,
@@ -2645,12 +2711,21 @@ const styles = StyleSheet.create({
     color: theme.text,
     fontSize: 16,
     fontWeight: '800',
+    lineHeight: 22,
+    flexShrink: 1,
+    flexWrap: 'wrap',
+    maxWidth: '100%',
+    ...webTextWrapStyle,
   },
   cardText: {
     color: theme.muted,
     fontSize: 14,
     lineHeight: 21,
     marginTop: 4,
+    flexShrink: 1,
+    flexWrap: 'wrap',
+    maxWidth: '100%',
+    ...webTextWrapStyle,
   },
   currentVitalsStrip: {
     flexDirection: 'row',
@@ -2669,6 +2744,11 @@ const styles = StyleSheet.create({
     color: theme.muted,
     fontSize: 12,
     fontWeight: '700',
+    lineHeight: 18,
+    flexShrink: 1,
+    flexWrap: 'wrap',
+    maxWidth: '100%',
+    ...webTextWrapStyle,
   },
   currentVitalsValue: {
     color: theme.text,
@@ -2680,6 +2760,11 @@ const styles = StyleSheet.create({
     color: theme.muted,
     fontSize: 12,
     fontWeight: '600',
+    lineHeight: 18,
+    flexShrink: 1,
+    flexWrap: 'wrap',
+    maxWidth: '100%',
+    ...webTextWrapStyle,
   },
   keyValueList: {
     gap: 10,
@@ -2696,6 +2781,9 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     lineHeight: 18,
+    flexShrink: 1,
+    flexWrap: 'wrap',
+    ...webTextWrapStyle,
   },
   keyValueValue: {
     flex: 1,
@@ -2703,6 +2791,74 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
     textAlign: 'right',
+    flexShrink: 1,
+    flexWrap: 'wrap',
+    maxWidth: '100%',
+    ...webTextWrapStyle,
+  },
+  contactCardTitle: {
+    color: theme.text,
+    fontSize: 20,
+    fontWeight: '900',
+    lineHeight: 26,
+  },
+  contactCardRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 16,
+  },
+  contactInfoList: {
+    gap: 14,
+  },
+  contactInfoRow: {
+    gap: 4,
+  },
+  contactInfoLabel: {
+    color: theme.muted,
+    fontSize: 15,
+    fontWeight: '700',
+    lineHeight: 21,
+  },
+  contactInfoValue: {
+    color: theme.text,
+    fontSize: 17,
+    fontWeight: '900',
+    lineHeight: 23,
+  },
+  contactQrBlock: {
+    width: 132,
+    alignItems: 'center',
+    gap: 8,
+  },
+  contactQrImage: {
+    width: 120,
+    height: 120,
+    borderRadius: 12,
+    backgroundColor: '#F7FBFD',
+  },
+  contactQrFallback: {
+    width: 120,
+    height: 120,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: '#F7FBFD',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 12,
+  },
+  contactQrFallbackText: {
+    color: theme.muted,
+    fontSize: 15,
+    fontWeight: '700',
+    lineHeight: 21,
+    textAlign: 'center',
+  },
+  contactQrLabel: {
+    color: theme.text,
+    fontSize: 15,
+    fontWeight: '800',
   },
   score: {
     color: theme.primary,
@@ -3080,6 +3236,11 @@ const styles = StyleSheet.create({
     color: theme.danger,
     fontSize: 12,
     fontWeight: '900',
+    lineHeight: 18,
+    flexShrink: 1,
+    flexWrap: 'wrap',
+    maxWidth: '100%',
+    ...webTextWrapStyle,
   },
   patientListCard: {
     borderRadius: 16,
@@ -3141,6 +3302,11 @@ const styles = StyleSheet.create({
     color: theme.primary,
     fontSize: 13,
     fontWeight: '900',
+    lineHeight: 18,
+    flexShrink: 1,
+    flexWrap: 'wrap',
+    maxWidth: '100%',
+    ...webTextWrapStyle,
   },
   slotInfo: {
     marginTop: 8,
@@ -3176,6 +3342,11 @@ const styles = StyleSheet.create({
     color: theme.text,
     fontSize: 18,
     fontWeight: '900',
+    lineHeight: 24,
+    flexShrink: 1,
+    flexWrap: 'wrap',
+    maxWidth: '100%',
+    ...webTextWrapStyle,
   },
   slotPatientNameAlert: {
     color: '#B42318',
@@ -3193,6 +3364,11 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 11,
     fontWeight: '900',
+    lineHeight: 16,
+    flexShrink: 1,
+    flexWrap: 'wrap',
+    maxWidth: '100%',
+    ...webTextWrapStyle,
   },
   inlineAckBadgeText: {
     color: theme.text,
@@ -3202,6 +3378,10 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
     lineHeight: 20,
+    flexShrink: 1,
+    flexWrap: 'wrap',
+    maxWidth: '100%',
+    ...webTextWrapStyle,
   },
   anomalyMetricSummary: {
     color: '#B42318',
@@ -3245,7 +3425,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#B9D7D2',
     backgroundColor: theme.card,
-    padding: 12,
+    padding: 16,
     gap: 10,
   },
   expandedVitalsHeader: {
@@ -3263,13 +3443,18 @@ const styles = StyleSheet.create({
     color: theme.text,
     fontSize: 17,
     fontWeight: '900',
+    lineHeight: 24,
+    flexShrink: 1,
+    flexWrap: 'wrap',
+    maxWidth: '100%',
+    ...webTextWrapStyle,
   },
   targetCard: {
     borderRadius: 12,
     borderWidth: 1,
     borderColor: theme.border,
     backgroundColor: '#FCFEFF',
-    padding: 14,
+    padding: 16,
     gap: 10,
     shadowColor: '#12324A',
     shadowOpacity: 0.05,
@@ -3281,12 +3466,21 @@ const styles = StyleSheet.create({
     color: theme.text,
     fontSize: 16,
     fontWeight: '900',
+    lineHeight: 22,
+    flexShrink: 1,
+    flexWrap: 'wrap',
+    maxWidth: '100%',
+    ...webTextWrapStyle,
   },
   targetCaption: {
     color: theme.muted,
     fontSize: 12,
     fontWeight: '700',
     lineHeight: 18,
+    flexShrink: 1,
+    flexWrap: 'wrap',
+    maxWidth: '100%',
+    ...webTextWrapStyle,
   },
   targetGrid: {
     flexDirection: 'row',
@@ -3305,6 +3499,10 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '900',
     lineHeight: 19,
+    flexShrink: 1,
+    flexWrap: 'wrap',
+    maxWidth: '100%',
+    ...webTextWrapStyle,
   },
   statusPill: {
     borderRadius: 999,
@@ -3327,6 +3525,11 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 12,
     fontWeight: '900',
+    lineHeight: 18,
+    flexShrink: 1,
+    flexWrap: 'wrap',
+    maxWidth: '100%',
+    ...webTextWrapStyle,
   },
   statusTextDark: {
     color: theme.text,
@@ -3380,6 +3583,11 @@ const styles = StyleSheet.create({
   metricLabel: {
     color: theme.muted,
     fontWeight: '800',
+    lineHeight: 18,
+    flexShrink: 1,
+    flexWrap: 'wrap',
+    maxWidth: '100%',
+    ...webTextWrapStyle,
   },
   vitalMetricLabelAlert: {
     color: '#B42318',
@@ -3397,6 +3605,11 @@ const styles = StyleSheet.create({
     color: theme.muted,
     fontSize: 12,
     fontWeight: '700',
+    lineHeight: 18,
+    flexShrink: 1,
+    flexWrap: 'wrap',
+    maxWidth: '100%',
+    ...webTextWrapStyle,
   },
   metricAlertBadge: {
     borderRadius: 999,
@@ -3677,6 +3890,10 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 19,
     marginTop: 4,
+    flexShrink: 1,
+    flexWrap: 'wrap',
+    maxWidth: '100%',
+    ...webTextWrapStyle,
   },
   manualAccordionChevron: {
     color: theme.primary,
@@ -3735,19 +3952,28 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '800',
     lineHeight: 20,
+    flexShrink: 1,
+    flexWrap: 'wrap',
+    maxWidth: '100%',
+    ...webTextWrapStyle,
   },
   manualContentCard: {
     borderRadius: 12,
     borderWidth: 1,
     borderColor: '#DCE9EF',
     backgroundColor: '#FCFEFF',
-    padding: 14,
+    padding: 16,
     gap: 10,
   },
   manualContentTitle: {
     color: theme.text,
     fontSize: 15,
     fontWeight: '900',
+    lineHeight: 21,
+    flexShrink: 1,
+    flexWrap: 'wrap',
+    maxWidth: '100%',
+    ...webTextWrapStyle,
   },
   manualBulletList: {
     gap: 8,
@@ -3757,6 +3983,10 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 21,
     fontWeight: '600',
+    flexShrink: 1,
+    flexWrap: 'wrap',
+    maxWidth: '100%',
+    ...webTextWrapStyle,
   },
   manualTabsRow: {
     flexDirection: 'row',
@@ -3839,12 +4069,21 @@ const styles = StyleSheet.create({
     color: theme.text,
     fontSize: 17,
     fontWeight: '900',
+    lineHeight: 24,
+    flexShrink: 1,
+    flexWrap: 'wrap',
+    maxWidth: '100%',
+    ...webTextWrapStyle,
   },
   favoriteSummaryText: {
     color: theme.muted,
     fontSize: 13,
     lineHeight: 19,
     marginTop: 4,
+    flexShrink: 1,
+    flexWrap: 'wrap',
+    maxWidth: '100%',
+    ...webTextWrapStyle,
   },
   favoriteSummaryBody: {
     gap: 10,
@@ -3864,12 +4103,20 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '900',
     lineHeight: 20,
+    flexShrink: 1,
+    flexWrap: 'wrap',
+    maxWidth: '100%',
+    ...webTextWrapStyle,
   },
   favoriteLinkText: {
     color: theme.muted,
     fontSize: 12,
     lineHeight: 18,
     marginTop: 3,
+    flexShrink: 1,
+    flexWrap: 'wrap',
+    maxWidth: '100%',
+    ...webTextWrapStyle,
   },
   favoriteLinkChevron: {
     color: theme.primary,
@@ -3895,12 +4142,21 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '900',
     textAlign: 'center',
+    lineHeight: 20,
+    flexShrink: 1,
+    flexWrap: 'wrap',
+    maxWidth: '100%',
+    ...webTextWrapStyle,
   },
   favoriteEmptyText: {
     color: theme.muted,
     fontSize: 12,
     lineHeight: 18,
     textAlign: 'center',
+    flexShrink: 1,
+    flexWrap: 'wrap',
+    maxWidth: '100%',
+    ...webTextWrapStyle,
   },
   searchHistoryWrap: {
     gap: 8,
@@ -3909,6 +4165,11 @@ const styles = StyleSheet.create({
     color: theme.muted,
     fontSize: 12,
     fontWeight: '800',
+    lineHeight: 18,
+    flexShrink: 1,
+    flexWrap: 'wrap',
+    maxWidth: '100%',
+    ...webTextWrapStyle,
   },
   searchHistoryRow: {
     flexDirection: 'row',
@@ -3927,6 +4188,11 @@ const styles = StyleSheet.create({
     color: theme.primary,
     fontSize: 12,
     fontWeight: '800',
+    lineHeight: 18,
+    flexShrink: 1,
+    flexWrap: 'wrap',
+    maxWidth: '100%',
+    ...webTextWrapStyle,
   },
   favoriteButton: {
     width: 42,
@@ -3977,12 +4243,20 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '900',
     lineHeight: 22,
+    flexShrink: 1,
+    flexWrap: 'wrap',
+    maxWidth: '100%',
+    ...webTextWrapStyle,
   },
   faqAnswerText: {
     color: theme.muted,
     fontSize: 14,
     lineHeight: 21,
     fontWeight: '600',
+    flexShrink: 1,
+    flexWrap: 'wrap',
+    maxWidth: '100%',
+    ...webTextWrapStyle,
   },
   faqAnswerWrap: {
     paddingTop: 2,
@@ -4018,6 +4292,10 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     marginTop: 10,
     lineHeight: 19,
+    flexShrink: 1,
+    flexWrap: 'wrap',
+    maxWidth: '100%',
+    ...webTextWrapStyle,
   },
   modalBackdrop: {
     flex: 1,
