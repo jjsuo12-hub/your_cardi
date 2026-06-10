@@ -212,6 +212,7 @@ export default function App() {
   const [anomalyTypes, setAnomalyTypes] = useState<Record<string, DemoAnomalyType>>({});
   const [patientAlertStates, setPatientAlertStates] = useState<Record<string, PatientAlertState>>({});
   const [expandedPatientId, setExpandedPatientId] = useState<string | null>(null);
+  const [activePatientDetailTab, setActivePatientDetailTab] = useState<'ecg' | 'history' | 'target' | 'record' | null>(null);
   const [blinkOn, setBlinkOn] = useState(true);
   const [reduceMotion, setReduceMotion] = useState(false);
   const [manualSearch, setManualSearch] = useState('');
@@ -668,7 +669,14 @@ export default function App() {
 
   const toggleExpandedPatient = (patientId: string) => {
     setSelectedPatientId(patientId);
-    setExpandedPatientId((current) => (current === patientId ? null : patientId));
+    setExpandedPatientId((current) => {
+      if (current === patientId) {
+        setActivePatientDetailTab(null);
+        return null;
+      }
+      setActivePatientDetailTab(null);
+      return patientId;
+    });
   };
 
   if (!fontsLoaded) return null;
@@ -712,7 +720,9 @@ export default function App() {
               patients={appliedPatients}
               vitals={vitals}
               expandedPatientId={expandedPatientId}
+              activePatientDetailTab={activePatientDetailTab}
               toggleExpandedPatient={toggleExpandedPatient}
+              toggleDetailTab={(tabName) => setActivePatientDetailTab((current) => (current === tabName ? null : tabName))}
               isDemoAnomalyMode={isDemoAnomalyMode}
               toggleDemoAnomalyMode={toggleDemoAnomalyMode}
               patientAlertStates={patientAlertStates}
@@ -985,7 +995,9 @@ function PatientsScreen({
   patients,
   vitals,
   expandedPatientId,
+  activePatientDetailTab,
   toggleExpandedPatient,
+  toggleDetailTab,
   isDemoAnomalyMode,
   toggleDemoAnomalyMode,
   patientAlertStates,
@@ -997,7 +1009,9 @@ function PatientsScreen({
   patients: Patient[];
   vitals: Record<string, VitalSign>;
   expandedPatientId: string | null;
+  activePatientDetailTab: 'ecg' | 'history' | 'target' | 'record' | null;
   toggleExpandedPatient: (id: string) => void;
+  toggleDetailTab: (tab: 'ecg' | 'history' | 'target' | 'record') => void;
   isDemoAnomalyMode: boolean;
   toggleDemoAnomalyMode: (enabled: boolean) => void;
   patientAlertStates: Record<string, PatientAlertState>;
@@ -1007,15 +1021,6 @@ function PatientsScreen({
   reduceMotion: boolean;
 }) {
   const slots = Array.from({ length: 6 }, (_, index) => patients[index] ?? null);
-  const [openSections, setOpenSections] = useState<Record<string, string | null>>({});
-
-  const togglePatientSection = (patientId: string, sectionId: string) => {
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-    setOpenSections((current) => ({
-      ...current,
-      [patientId]: current[patientId] === sectionId ? null : sectionId,
-    }));
-  };
 
   return (
     <View style={styles.screen}>
@@ -1078,6 +1083,7 @@ function PatientsScreen({
                     </View>
                     <View style={styles.patientCardMetaRow}>
                       <Text style={styles.slotMeta}>{patient.room}{patient.bed ? `-${patient.bed}` : ''}</Text>
+                      <Text style={styles.slotMeta}>HiCardi {getHicardiStatusLabel(patient.hicardiStatus)}</Text>
                       <Text style={styles.slotMeta}>연결 {signalLabels[vital?.signalQuality ?? 'good']}</Text>
                       <Text style={styles.slotMeta}>배터리 {patient.battery}%</Text>
                     </View>
@@ -1098,87 +1104,81 @@ function PatientsScreen({
               </Pressable>
 
               {patient && selected && vital && (
-                <View style={styles.expandedVitalsPanel}>
-                  <Pressable style={styles.expandedVitalsHeader} onPress={() => toggleExpandedPatient(patient.id)}>
+                <Pressable style={styles.expandedVitalsPanel} onPress={() => toggleExpandedPatient(patient.id)}>
+                  <View style={styles.expandedVitalsHeader}>
                     <View style={styles.slideHandle} />
                     <Text style={styles.expandedTitle}>생체정보 상세</Text>
-                    <Text style={styles.sectionCaption}>선택 환자: {patient.name} · 펼친 카드에서 필요한 항목만 확인합니다.</Text>
-                  </Pressable>
+                    <Text style={styles.sectionCaption}>선택 환자: {patient.name}</Text>
+                  </View>
+                  <View style={styles.expandedSummaryStrip}>
+                    <Text style={[styles.expandedSummaryText, abnormalMetrics.includes('HR') && styles.textDanger]}>HR {vital.hr}</Text>
+                    <Text style={[styles.expandedSummaryText, abnormalMetrics.includes('RR') && styles.textDanger]}>RR {vital.rr}</Text>
+                    <Text style={[styles.expandedSummaryText, abnormalMetrics.includes('SpO2') && styles.textDanger]}>SpO2 {vital.spo2}</Text>
+                    <Text style={[styles.expandedSummaryText, abnormalMetrics.includes('SkinTemp') && styles.textDanger]}>Skin {vital.temperature.toFixed(1)}</Text>
+                  </View>
                   {hasAnomaly && (shouldShowBlinkingAlert || isAcknowledged) && (
-                    <View style={styles.acknowledgePanel}>
+                    <Pressable style={styles.acknowledgePanel} onPress={(event) => event.stopPropagation?.()}>
                       <Text style={styles.acknowledgeText}>
                         {isAcknowledged
                           ? '확인 완료 · 10분 동안 해당 환자의 데모 알림 깜빡임을 중지합니다.'
                           : '개발용 데모 기능입니다. 실제 환자 데이터가 아니며 임상 판단에 사용할 수 없습니다.'}
                       </Text>
                       {shouldShowBlinkingAlert && (
-                        <Pressable style={styles.acknowledgeButton} onPress={() => acknowledgePatientAnomaly(patient.id)}>
+                        <Pressable
+                          style={styles.acknowledgeButton}
+                          onPress={(event) => {
+                            event.stopPropagation?.();
+                            acknowledgePatientAnomaly(patient.id);
+                          }}
+                        >
                           <Text style={styles.acknowledgeButtonText}>확인했습니다</Text>
                         </Pressable>
                       )}
-                    </View>
+                    </Pressable>
                   )}
-
-                  <AccordionCard
-                    title="현재 생체정보"
-                    badge="Live demo"
-                    expanded={openSections[patient.id] === 'vitals'}
-                    onToggle={() => togglePatientSection(patient.id, 'vitals')}
-                  >
-                    <View style={styles.metricGrid}>
-                      <VitalMetricCard label="HR" value={`${vital.hr}`} unit="bpm" abnormal={abnormalMetrics.includes('HR')} acknowledged={isAcknowledged} blink={shouldBlink} showAlert={shouldShowBlinkingAlert && alertMetrics.includes('HR')} />
-                      <VitalMetricCard label="SpO2" value={`${vital.spo2}`} unit="%" abnormal={abnormalMetrics.includes('SpO2')} acknowledged={isAcknowledged} blink={shouldBlink} showAlert={shouldShowBlinkingAlert && alertMetrics.includes('SpO2')} />
-                      <VitalMetricCard label="RR" value={`${vital.rr}`} unit="breaths/min" abnormal={abnormalMetrics.includes('RR')} acknowledged={false} blink={false} showAlert={false} />
-                      <VitalMetricCard label="SkinTemp" displayLabel="Skin Temp" value={vital.temperature.toFixed(1)} unit="°C" abnormal={abnormalMetrics.includes('SkinTemp')} acknowledged={false} blink={false} showAlert={false} />
-                    </View>
-                  </AccordionCard>
-
-                  <AccordionCard
-                    title="ECG 보기"
-                    badge="시뮬레이션"
-                    expanded={openSections[patient.id] === 'ecg'}
-                    onToggle={() => togglePatientSection(patient.id, 'ecg')}
-                  >
-                    <PatientVitalsScreen
-                      patientName={patient.name}
-                      roomBed={`${patient.room}${patient.bed ? `-${patient.bed}` : ''}`}
-                      reason={patient.applicationReason || getPatientCategorySummary(patient)}
-                    />
-                  </AccordionCard>
-
-                  <AccordionCard
-                    title="Vital Signs History 보기"
-                    badge="그래프"
-                    expanded={openSections[patient.id] === 'history'}
-                    onToggle={() => togglePatientSection(patient.id, 'history')}
-                  >
-                    <VitalSignsHistoryChart />
-                  </AccordionCard>
-
-                  <AccordionCard
-                    title="알림 범위 설정"
-                    badge="설정"
-                    expanded={openSections[patient.id] === 'targets'}
-                    onToggle={() => togglePatientSection(patient.id, 'targets')}
-                  >
-                    <PatientTargetFields targets={patient.targets} setTargets={(targets) => updatePatientTargets(patient.id, targets)} />
-                  </AccordionCard>
-
-                  <AccordionCard
-                    title="적용 기록 보기"
-                    badge="기록"
-                    expanded={openSections[patient.id] === 'record'}
-                    onToggle={() => togglePatientSection(patient.id, 'record')}
-                  >
-                    <View style={styles.keyValueList}>
-                      <KeyValue label="환자번호" value={patient.patientNumber ?? patient.id} />
-                      <KeyValue label="적용 상태" value={getHicardiStatusLabel(patient.hicardiStatus)} />
-                      <KeyValue label="적용 시작" value={patient.hicardiStartTime ?? '-'} />
-                      <KeyValue label="적용 사유" value={patient.applicationReason || '시연용 등록'} />
-                      <KeyValue label="최근 알람" value={patient.latestAlert || '-'} />
-                    </View>
-                  </AccordionCard>
-                </View>
+                  <Pressable style={styles.detailTabRow} onPress={(event) => event.stopPropagation?.()}>
+                    <DetailTabButton label="ECG" active={activePatientDetailTab === 'ecg'} onPress={() => toggleDetailTab('ecg')} />
+                    <DetailTabButton label="Vital History" active={activePatientDetailTab === 'history'} onPress={() => toggleDetailTab('history')} />
+                    <DetailTabButton label="알림 범위" active={activePatientDetailTab === 'target'} onPress={() => toggleDetailTab('target')} />
+                    <DetailTabButton label="적용 기록" active={activePatientDetailTab === 'record'} onPress={() => toggleDetailTab('record')} />
+                  </Pressable>
+                  {activePatientDetailTab ? (
+                    <Pressable
+                      style={styles.detailFlatSection}
+                      onPress={(event) => {
+                        event.stopPropagation?.();
+                        toggleDetailTab(activePatientDetailTab);
+                      }}
+                    >
+                      <View style={styles.detailFlatHeader}>
+                        <Text style={styles.detailFlatTitle}>{getPatientDetailTabLabel(activePatientDetailTab)}</Text>
+                        <Text style={styles.detailFlatHint}>다시 터치하면 닫힘</Text>
+                      </View>
+                      <Pressable style={styles.detailFlatBody} onPress={(event) => event.stopPropagation?.()}>
+                        {activePatientDetailTab === 'ecg' ? (
+                          <PatientVitalsScreen
+                            patientName={patient.name}
+                            roomBed={`${patient.room}${patient.bed ? `-${patient.bed}` : ''}`}
+                            reason={patient.applicationReason || getPatientCategorySummary(patient)}
+                          />
+                        ) : null}
+                        {activePatientDetailTab === 'history' ? <VitalSignsHistoryChart /> : null}
+                        {activePatientDetailTab === 'target' ? (
+                          <PatientTargetFields targets={patient.targets} setTargets={(targets) => updatePatientTargets(patient.id, targets)} flat />
+                        ) : null}
+                        {activePatientDetailTab === 'record' ? (
+                          <View style={styles.recordFlatList}>
+                            <KeyValue label="환자번호" value={patient.patientNumber ?? patient.id} />
+                            <KeyValue label="적용 상태" value={getHicardiStatusLabel(patient.hicardiStatus)} />
+                            <KeyValue label="적용 시작" value={patient.hicardiStartTime ?? '-'} />
+                            <KeyValue label="적용 사유" value={patient.applicationReason || '시연용 등록'} />
+                            <KeyValue label="최근 알람" value={patient.latestAlert || '-'} />
+                          </View>
+                        ) : null}
+                      </Pressable>
+                    </Pressable>
+                  ) : null}
+                </Pressable>
               )}
             </View>
           );
@@ -1191,9 +1191,11 @@ function PatientsScreen({
 function PatientTargetFields({
   targets,
   setTargets,
+  flat,
 }: {
   targets: PatientTargets;
   setTargets: (targets: PatientTargets) => void;
+  flat?: boolean;
 }) {
   const updateNumber = (key: keyof PatientTargets, value: string) => {
     const numeric = Number(value.replace(/[^0-9.]/g, ''));
@@ -1201,7 +1203,7 @@ function PatientTargetFields({
   };
 
   return (
-    <View style={styles.targetCard}>
+    <View style={[styles.targetCard, flat && styles.targetCardFlat]}>
       <View style={styles.rowBetween}>
         <Text style={styles.targetTitle}>시연용 알림 범위 설정</Text>
         <Badge text="시연용 설정" compact />
@@ -1215,6 +1217,22 @@ function PatientTargetFields({
       </View>
       <Text style={styles.targetCaption}>RR, Skin Temperature는 신뢰성이 낮아 환자 상태 확인 알림 기준에서는 제외했습니다. 수치 카드와 그래프의 참고 표시는 유지됩니다.</Text>
     </View>
+  );
+}
+
+function DetailTabButton({
+  label,
+  active,
+  onPress,
+}: {
+  label: string;
+  active: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable style={[styles.detailTabButton, active && styles.detailTabButtonActive]} onPress={onPress}>
+      <Text style={[styles.detailTabButtonText, active && styles.detailTabButtonTextActive]}>{label}</Text>
+    </Pressable>
   );
 }
 
@@ -2221,6 +2239,13 @@ function getNews2DisplayScore(label: string, result: News2Result) {
   if (label === '의식상태') return result.itemScores.consciousness;
   if (label === '체온') return result.itemScores.temperature;
   return 0;
+}
+
+function getPatientDetailTabLabel(tab: 'ecg' | 'history' | 'target' | 'record') {
+  if (tab === 'ecg') return 'ECG';
+  if (tab === 'history') return 'Vital History';
+  if (tab === 'target') return '알림 범위';
+  return '적용 기록';
 }
 
 function getFaqPriority(question: string) {
@@ -3420,13 +3445,11 @@ const styles = StyleSheet.create({
     lineHeight: 22,
   },
   expandedVitalsPanel: {
-    marginTop: 8,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#B9D7D2',
-    backgroundColor: theme.card,
+    marginTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#E5E7EB',
     padding: 16,
-    gap: 10,
+    gap: 12,
   },
   expandedVitalsHeader: {
     gap: 6,
@@ -3461,6 +3484,15 @@ const styles = StyleSheet.create({
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 4 },
     elevation: 2,
+  },
+  targetCardFlat: {
+    borderRadius: 12,
+    borderColor: '#E5E7EB',
+    backgroundColor: '#FAFBFC',
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 0,
   },
   targetTitle: {
     color: theme.text,
@@ -3499,6 +3531,22 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '900',
     lineHeight: 19,
+    flexShrink: 1,
+    flexWrap: 'wrap',
+    maxWidth: '100%',
+    ...webTextWrapStyle,
+  },
+  expandedSummaryStrip: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    paddingBottom: 4,
+  },
+  expandedSummaryText: {
+    color: theme.text,
+    fontSize: 14,
+    fontWeight: '800',
+    lineHeight: 20,
     flexShrink: 1,
     flexWrap: 'wrap',
     maxWidth: '100%',
@@ -3632,7 +3680,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     borderWidth: 1,
     borderColor: '#FFB3B3',
-    backgroundColor: '#FFE5E5',
+    backgroundColor: '#FFF7F7',
     padding: 12,
     gap: 10,
   },
@@ -3653,6 +3701,66 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 13,
     fontWeight: '900',
+  },
+  detailTabRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  detailTabButton: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#D6E2E8',
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  detailTabButtonActive: {
+    borderColor: '#1E5B8C',
+    backgroundColor: '#EAF3F9',
+  },
+  detailTabButtonText: {
+    color: theme.text,
+    fontSize: 13,
+    fontWeight: '700',
+    lineHeight: 18,
+  },
+  detailTabButtonTextActive: {
+    color: '#1E5B8C',
+  },
+  detailFlatSection: {
+    marginTop: 4,
+    borderTopWidth: 1,
+    borderTopColor: '#E5E7EB',
+    paddingTop: 12,
+    gap: 10,
+  },
+  detailFlatHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  detailFlatTitle: {
+    color: theme.text,
+    fontSize: 15,
+    fontWeight: '800',
+    lineHeight: 22,
+    flexShrink: 1,
+  },
+  detailFlatHint: {
+    color: theme.muted,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  detailFlatBody: {
+    gap: 10,
+  },
+  recordFlatList: {
+    gap: 8,
+    borderRadius: 12,
+    backgroundColor: '#FAFBFC',
+    padding: 12,
   },
   trendCard: {
     borderRadius: 8,
