@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "HiCardi 적용 기준 체크리스트",
+    "name": "YourCARDI",
     "slug": "yourcadi",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -12,6 +12,12 @@
     "web": {
       "bundler": "metro",
       "favicon": "./assets/icons/appstore.png"
-    }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "29a1f894-bc30-4e73-a6cf-7f860456cd3c"
+      }
+    },
+    "owner": "spidey38"
   }
 }

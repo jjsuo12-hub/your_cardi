@@ -76,7 +76,7 @@ function AppRoot() {
       <StatusBar barStyle="light-content" backgroundColor={theme.primary} />
       <View style={styles.appShell}>
         <View style={headerStyle}>
-          <Text style={styles.headerTitle}>YOUR_Cardi</Text>
+          <Text style={styles.headerTitle}>YourCARDI</Text>
           <Text style={styles.headerSubtitle}>HiCardi 적용 기준 확인을 보조하는 병동 실무형 경량 버전</Text>
         </View>
 
