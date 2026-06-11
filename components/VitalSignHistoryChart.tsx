@@ -115,6 +115,11 @@ export function VitalSignHistoryChart({
     setActiveMetric(null);
   };
 
+  const collapseCard = () => {
+    clearSelection();
+    onToggleCollapse();
+  };
+
   const selectPoint = (index: number) => {
     const point = points[index];
     if (visibleTooltip?.index === index) {
@@ -161,7 +166,7 @@ export function VitalSignHistoryChart({
       </Pressable>
 
       {!collapsed ? (
-        <>
+        <Pressable style={styles.bodySection} onPress={collapseCard}>
           <View style={styles.currentRow}>
             <Text style={styles.currentLabel}>{config.yLabel}</Text>
             <Text style={styles.currentValue}>
@@ -169,9 +174,19 @@ export function VitalSignHistoryChart({
             </Text>
           </View>
 
-          <View style={styles.chartWrap}>
+          <Pressable style={styles.chartWrap} onPress={collapseCard}>
             <Svg width="100%" height={height} viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
-              <Rect x="0" y="0" width={width} height={height} fill="#FFFFFF" onPress={clearSelection} />
+              <Rect
+                x="0"
+                y="0"
+                width={width}
+                height={height}
+                fill="#FFFFFF"
+                onPress={(event) => {
+                  event.stopPropagation?.();
+                  collapseCard();
+                }}
+              />
               {config.ticks.map((tick) => {
                 const y = mapY(tick, config.min, config.max);
                 return (
@@ -222,13 +237,23 @@ export function VitalSignHistoryChart({
                       stroke="#FFFFFF"
                       strokeWidth="1.8"
                     />
-                    <Circle cx={cx} cy={cy} r="12" fill="transparent" onPress={() => selectPoint(index)} {...eventProps} />
+                    <Circle
+                      cx={cx}
+                      cy={cy}
+                      r="12"
+                      fill="transparent"
+                      onPress={(event) => {
+                        event.stopPropagation?.();
+                        selectPoint(index);
+                      }}
+                      {...eventProps}
+                    />
                   </React.Fragment>
                 );
               })}
               {visibleTooltip ? <SvgTooltip point={visibleTooltip} color={config.color} label={config.yLabel} /> : null}
             </Svg>
-          </View>
+          </Pressable>
 
           {visibleTooltip ? (
             <View pointerEvents="none" style={styles.tooltipCard}>
@@ -245,7 +270,7 @@ export function VitalSignHistoryChart({
 
           <Text style={styles.footer}>{config.footer}</Text>
           <Text style={styles.disclaimer}>상태 배지는 데모 표시이며 실제 임상판단, 진단, 처방에 사용할 수 없습니다.</Text>
-        </>
+        </Pressable>
       ) : null}
     </View>
   );
@@ -386,6 +411,9 @@ const styles = StyleSheet.create({
     color: '#6B7280',
     fontSize: 14,
     fontWeight: '800',
+  },
+  bodySection: {
+    gap: 10,
   },
   chartWrap: {
     height,
