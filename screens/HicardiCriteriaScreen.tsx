@@ -92,7 +92,7 @@ export function HicardiCriteriaScreen() {
           selected={usesSupplementalOxygen}
           onSelect={setUsesSupplementalOxygen}
         />
-        <InputRow label="수축기 혈압 SBP" value={values.sbp} onChangeText={(value) => setValues((current) => ({ ...current, sbp: value }))} />
+        <InputRow label="수축기혈압 SBP" value={values.sbp} onChangeText={(value) => setValues((current) => ({ ...current, sbp: value }))} />
         <InputRow label="맥박수 HR" value={values.hr} onChangeText={(value) => setValues((current) => ({ ...current, hr: value }))} />
         <ToggleRow
           label="의식상태"
@@ -126,7 +126,7 @@ export function HicardiCriteriaScreen() {
 
       <SectionCard
         title="병동 특수 적용 기준"
-        caption="병동 특수 적용 기준은 NEWS2 점수에 합산하지 않으며, NEWS2 5–6점 또는 1–4점 환자의 HiCardi 적용 판단을 보조하기 위해 사용합니다."
+        caption="병동 특수 적용 기준은 NEWS2 점수에 합산하지 않으며, NEWS2 5점 이상 또는 1-4점 환자의 HiCardi 적용 판단을 보조하기 위해 사용합니다."
       >
         <CheckCard
           title="ICU 또는 ER 경유"
@@ -136,7 +136,7 @@ export function HicardiCriteriaScreen() {
         />
         <CheckCard
           title="고위험 수술 또는 장기이식 수술"
-          description="전신마취 2시간 이상 또는 출혈·감염·호흡기 합병증 위험이 높은 수술"
+          description="전신마취 2시간 이상 또는 출혈·감염·호흡기 합병증 위험이 큰 수술"
           checked={specialCriteria.highRiskSurgeryOrTransplant}
           onPress={() =>
             setSpecialCriteria((current) => ({
@@ -156,7 +156,7 @@ export function HicardiCriteriaScreen() {
 
       <SectionCard title="응급상황 여부">
         <ToggleRow
-          label="응급상황 발생 시"
+          label="응급상황 발생 여부"
           options={[
             { label: '아니오', value: false },
             { label: '예', value: true },
@@ -165,7 +165,7 @@ export function HicardiCriteriaScreen() {
           onSelect={setEmergency}
         />
         {emergency ? (
-          <Text style={styles.emergencyText}>응급상황은 기존 적용 기준과 관계없이 즉시 보고가 우선입니다.</Text>
+          <Text style={styles.emergencyText}>응급상황 발생 시에는 환자 상태를 즉시 확인하고 담당 의료진과 상의합니다.</Text>
         ) : null}
       </SectionCard>
 
@@ -182,10 +182,10 @@ export function HicardiCriteriaScreen() {
           />
           <AccordionCard title="재평가 및 중단 기준">
             <View style={styles.reassessmentList}>
-              <Text style={styles.reassessmentText}>NEWS2 7점 이상: 매일 재평가</Text>
-              <Text style={styles.reassessmentText}>NEWS2 5–6점: 수술 후 지정일 재평가, POD 2, POD 7, POD 14</Text>
-              <Text style={styles.reassessmentText}>NEWS2 4점 미만 유지: HiCardi 중단 고려</Text>
-              <Text style={styles.reassessmentText}>응급상황 발생 시: 기존 적용 기준과 관계없이 즉시 보고 및 적용 검토</Text>
+              <Text style={styles.reassessmentText}>NEWS2 ≥ 7점: 매일 재평가 후 담당 의료진과 적용 유지 여부를 상의합니다.</Text>
+              <Text style={styles.reassessmentText}>NEWS2 5-6점: 지정된 시점에 재평가하고 담당 의료진과 적용 유지 여부를 상의합니다.</Text>
+              <Text style={styles.reassessmentText}>NEWS2 4점 미만 유지: 담당 의료진과 HiCardi 적용 중단 여부를 상의합니다.</Text>
+              <Text style={styles.reassessmentText}>응급상황 발생 시: 환자 상태를 즉시 확인하고 담당 의료진과 상의합니다.</Text>
             </View>
           </AccordionCard>
         </>
@@ -282,27 +282,27 @@ function ScoreLine({ label, value }: { label: string; value: number }) {
 
 function getBandLabel(score: number) {
   if (score >= 7) return '7점 이상';
-  if (score >= 5) return '5–6점';
-  if (score >= 1) return '1–4점';
+  if (score >= 5) return '5-6점';
+  if (score >= 1) return '1-4점';
   return '4점 미만';
 }
 
 function mapResultTitle(decision: ReturnType<typeof evaluateHicardiDecision>['decision']) {
-  if (decision === 'startHicardi') return 'HiCardi 적용 권장';
-  if (decision === 'recommendHicardi') return 'HiCardi 적용 권고';
-  if (decision === 'consultSenior') return '상급자와 협의';
-  if (decision === 'considerStop') return 'HiCardi 중단 고려';
-  if (decision === 'emergencyApply') return '즉시 보고 및 HiCardi 적용 검토';
+  if (decision === 'startHicardi') return 'HiCardi 적용 상의 필요';
+  if (decision === 'recommendHicardi') return 'HiCardi 적용 상의 권고';
+  if (decision === 'consultSenior') return '의료진 상의 필요';
+  if (decision === 'considerStop') return 'HiCardi 중단 여부 상의';
+  if (decision === 'emergencyApply') return '즉시 의료진 상의 필요';
   return '일반 관찰 유지';
 }
 
 function mapActionText(decision: ReturnType<typeof evaluateHicardiDecision>['decision']) {
-  if (decision === 'startHicardi') return '담당 진료과 보고 및 HiCardi 적용 검토';
-  if (decision === 'recommendHicardi') return '상급자 또는 담당 진료과 보고 후 적용 결정';
-  if (decision === 'consultSenior') return 'HiCardi 적용 여부를 상급자와 협의';
-  if (decision === 'considerStop') return '이미 적용 중인 경우 중단 여부를 검토';
-  if (decision === 'emergencyApply') return '즉시 보고 후 기존 기준과 관계없이 적용 검토';
-  return '정기적 NEWS2 측정 및 환자 상태 모니터링 유지';
+  if (decision === 'startHicardi') return '환자 상태를 확인하고 담당 의료진과 적용 여부를 상의하세요.';
+  if (decision === 'recommendHicardi') return '상급자 및 담당 의료진과 HiCardi 적용 여부를 상의하세요.';
+  if (decision === 'consultSenior') return 'HiCardi 적용 여부를 상급자 및 담당 의료진과 상의하세요.';
+  if (decision === 'considerStop') return '담당 의료진과 HiCardi 중단 여부를 상의하세요.';
+  if (decision === 'emergencyApply') return '환자 상태를 즉시 확인하고 담당 의료진과 상의하세요.';
+  return '정기적 NEWS2 측정과 환자 상태 관찰을 유지하세요.';
 }
 
 function mapResultTone(decision: ReturnType<typeof evaluateHicardiDecision>['decision']) {
