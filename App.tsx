@@ -1,11 +1,13 @@
 import React from 'react';
-import { Platform, Pressable, SafeAreaView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Platform, Pressable, StatusBar, StyleProp, StyleSheet, Text, TextInput, View, ViewStyle } from 'react-native';
 import Svg, { Circle, Line, Path, Rect } from 'react-native-svg';
 import { useFonts } from 'expo-font';
+import { SafeAreaProvider, initialWindowMetrics, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { FaqScreen } from './screens/FaqScreen';
 import { HicardiCriteriaScreen } from './screens/HicardiCriteriaScreen';
 import { ManualScreen } from './screens/ManualScreen';
+import { CONTENT_MAX_WIDTH, TAB_BAR_BASE_HEIGHT, getBottomInsetSpace } from './utils/layout';
 
 type Tab = 'criteria' | 'manual' | 'faq';
 
@@ -39,30 +41,66 @@ function applyDefaultTypography() {
 applyDefaultTypography();
 
 export default function App() {
+  return (
+    <SafeAreaProvider initialMetrics={initialWindowMetrics}>
+      <AppRoot />
+    </SafeAreaProvider>
+  );
+}
+
+function AppRoot() {
+  const insets = useSafeAreaInsets();
   const [fontsLoaded] = useFonts(customFontAssets);
   const [tab, setTab] = React.useState<Tab>('criteria');
 
   if (!fontsLoaded) return null;
 
+  const bottomInset = getBottomInsetSpace(insets.bottom);
+  const headerStyle: StyleProp<ViewStyle> = [
+    styles.header,
+    {
+      paddingTop: insets.top + 12,
+      minHeight: 76 + insets.top,
+    },
+  ];
+  const tabBarStyle: StyleProp<ViewStyle> = [
+    styles.tabBar,
+    {
+      height: TAB_BAR_BASE_HEIGHT + bottomInset,
+      paddingBottom: bottomInset,
+    },
+  ];
+
   return (
-    <SafeAreaView style={styles.safe}>
+    <View style={styles.safe}>
+      <StatusBar barStyle="light-content" backgroundColor={theme.primary} />
       <View style={styles.appShell}>
-        <View style={styles.header}>
+        <View style={headerStyle}>
           <Text style={styles.headerTitle}>YOUR_Cardi</Text>
-          <Text style={styles.headerSubtitle}>HiCardi 적용 기준 확인을 보조하는 병동 실무용 경량 버전</Text>
+          <Text style={styles.headerSubtitle}>HiCardi 적용 기준 확인을 보조하는 병동 실무형 경량 버전</Text>
         </View>
 
-        {tab === 'criteria' ? <HicardiCriteriaScreen /> : null}
-        {tab === 'manual' ? <ManualScreen /> : null}
-        {tab === 'faq' ? <FaqScreen /> : null}
+        <View style={styles.screenContainer}>
+          {tab === 'criteria' ? <HicardiCriteriaScreen /> : null}
+          {tab === 'manual' ? <ManualScreen /> : null}
+          {tab === 'faq' ? <FaqScreen /> : null}
+        </View>
 
-        <BottomTabs active={tab} onChange={setTab} />
+        <BottomTabs active={tab} onChange={setTab} tabBarStyle={tabBarStyle} />
       </View>
-    </SafeAreaView>
+    </View>
   );
 }
 
-function BottomTabs({ active, onChange }: { active: Tab; onChange: (tab: Tab) => void }) {
+function BottomTabs({
+  active,
+  onChange,
+  tabBarStyle,
+}: {
+  active: Tab;
+  onChange: (tab: Tab) => void;
+  tabBarStyle: StyleProp<ViewStyle>;
+}) {
   const tabs: { id: Tab; label: string }[] = [
     { id: 'criteria', label: '적용 기준' },
     { id: 'manual', label: '매뉴얼' },
@@ -70,7 +108,7 @@ function BottomTabs({ active, onChange }: { active: Tab; onChange: (tab: Tab) =>
   ];
 
   return (
-    <View style={styles.tabBar}>
+    <View style={tabBarStyle}>
       {tabs.map((tab) => (
         <Pressable key={tab.id} style={[styles.tabButton, active === tab.id && styles.tabButtonActive]} onPress={() => onChange(tab.id)}>
           <View style={styles.tabInner}>
@@ -123,15 +161,18 @@ const styles = StyleSheet.create({
   appShell: {
     flex: 1,
     width: '100%',
-    maxWidth: 960,
+    maxWidth: CONTENT_MAX_WIDTH + 40,
     alignSelf: 'center',
     backgroundColor: theme.background,
   },
+  screenContainer: {
+    flex: 1,
+  },
   header: {
     backgroundColor: theme.primary,
-    paddingHorizontal: 16,
-    paddingTop: 10,
-    paddingBottom: 10,
+    paddingHorizontal: 20,
+    paddingBottom: 16,
+    minHeight: 76,
     gap: 4,
   },
   headerTitle: {
@@ -145,12 +186,19 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   tabBar: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
     flexDirection: 'row',
     gap: 8,
     paddingHorizontal: 16,
     paddingTop: 8,
-    paddingBottom: 16,
-    backgroundColor: theme.background,
+    paddingBottom: 12,
+    backgroundColor: theme.card,
+    borderTopWidth: 1,
+    borderTopColor: '#D6E2E8',
+    minHeight: TAB_BAR_BASE_HEIGHT,
   },
   tabButton: {
     flex: 1,
@@ -160,6 +208,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     paddingVertical: 10,
     paddingHorizontal: 8,
+    minHeight: 52,
+    justifyContent: 'center',
   },
   tabButtonActive: {
     backgroundColor: theme.primary,

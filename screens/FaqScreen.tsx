@@ -1,20 +1,29 @@
 import React from 'react';
 import { Image, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AccordionCard } from '../components/AccordionCard';
 import { SectionCard } from '../components/SectionCard';
 import { faqContent } from '../data/faqContent';
+import { CONTENT_MAX_WIDTH, getScrollPaddingBottom } from '../utils/layout';
 
 export function FaqScreen() {
+  const insets = useSafeAreaInsets();
   const [search, setSearch] = React.useState('');
   const [qrLoadFailed, setQrLoadFailed] = React.useState(false);
 
   const filteredItems = faqContent.filter((item) =>
     `${item.question} ${item.answer}`.toLowerCase().includes(search.trim().toLowerCase()),
   );
+  const contentContainerStyle = [
+    styles.content,
+    {
+      paddingBottom: getScrollPaddingBottom(insets.bottom),
+    },
+  ];
 
   return (
-    <ScrollView contentContainerStyle={styles.content}>
+    <ScrollView contentContainerStyle={contentContainerStyle}>
       <SectionCard title="">
         <Text style={styles.contactCardTitle}>People & Technology 고객센터</Text>
         <View style={styles.contactCardRow}>
@@ -67,8 +76,11 @@ export function FaqScreen() {
 
 const styles = StyleSheet.create({
   content: {
-    padding: 16,
-    paddingBottom: 96,
+    width: '100%',
+    maxWidth: CONTENT_MAX_WIDTH,
+    alignSelf: 'center',
+    paddingHorizontal: 20,
+    paddingTop: 20,
     gap: 12,
   },
   searchInput: {

@@ -1,10 +1,12 @@
 import React, { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AccordionCard } from '../components/AccordionCard';
 import { ResultCard } from '../components/ResultCard';
 import { SectionCard } from '../components/SectionCard';
 import { HicardiSpecialCriteria, News2Input } from '../types/appClinicalTypes';
+import { CONTENT_MAX_WIDTH, getScrollPaddingBottom } from '../utils/layout';
 import { evaluateHicardiDecision } from '../utils/hicardiDecisionEngine';
 import { calculateNews2 } from '../utils/news2Calculator';
 
@@ -19,6 +21,7 @@ const initialInput = {
 };
 
 export function HicardiCriteriaScreen() {
+  const insets = useSafeAreaInsets();
   const [values, setValues] = useState(initialInput);
   const [usesSupplementalOxygen, setUsesSupplementalOxygen] = useState(false);
   const [consciousness, setConsciousness] = useState<ConsciousnessValue>('alert');
@@ -57,9 +60,15 @@ export function HicardiCriteriaScreen() {
   );
 
   const specialCriteriaCount = Object.values(specialCriteria).filter(Boolean).length;
+  const contentContainerStyle = [
+    styles.content,
+    {
+      paddingBottom: getScrollPaddingBottom(insets.bottom),
+    },
+  ];
 
   return (
-    <ScrollView contentContainerStyle={styles.content}>
+    <ScrollView contentContainerStyle={contentContainerStyle}>
       <SectionCard title="HiCardi 적용 기준 확인">
         <Text style={styles.description}>
           환자 개인정보를 입력하지 않고, NEWS2와 병동 특수 적용 기준을 직접 입력하여 HiCardi 적용 필요성을 확인합니다.
@@ -305,8 +314,11 @@ function mapResultTone(decision: ReturnType<typeof evaluateHicardiDecision>['dec
 
 const styles = StyleSheet.create({
   content: {
-    padding: 16,
-    paddingBottom: 96,
+    width: '100%',
+    maxWidth: CONTENT_MAX_WIDTH,
+    alignSelf: 'center',
+    paddingHorizontal: 20,
+    paddingTop: 20,
     gap: 12,
   },
   description: {

@@ -1,12 +1,15 @@
 import React from 'react';
 import { Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AccordionCard } from '../components/AccordionCard';
 import { SectionCard } from '../components/SectionCard';
 import { manualContent } from '../data/manualContent';
 import { manualImageAssets } from '../data/manualImageAssets';
+import { CONTENT_MAX_WIDTH, getScrollPaddingBottom } from '../utils/layout';
 
 export function ManualScreen() {
+  const insets = useSafeAreaInsets();
   const [search, setSearch] = React.useState('');
   const [activeTabs, setActiveTabs] = React.useState<Record<string, string>>({
     step2: 'pc',
@@ -26,9 +29,15 @@ export function ManualScreen() {
 
     return haystack.includes(search.trim().toLowerCase());
   });
+  const contentContainerStyle = [
+    styles.content,
+    {
+      paddingBottom: getScrollPaddingBottom(insets.bottom),
+    },
+  ];
 
   return (
-    <ScrollView contentContainerStyle={styles.content}>
+    <ScrollView contentContainerStyle={contentContainerStyle}>
       <SectionCard title="매뉴얼">
         <TextInput
           value={search}
@@ -95,8 +104,11 @@ export function ManualScreen() {
 
 const styles = StyleSheet.create({
   content: {
-    padding: 16,
-    paddingBottom: 96,
+    width: '100%',
+    maxWidth: CONTENT_MAX_WIDTH,
+    alignSelf: 'center',
+    paddingHorizontal: 20,
+    paddingTop: 20,
     gap: 12,
   },
   searchInput: {
