@@ -11,6 +11,15 @@ import { CONTENT_MAX_WIDTH, TAB_BAR_BASE_HEIGHT, getBottomInsetSpace } from './u
 
 type Tab = 'criteria' | 'manual' | 'faq';
 
+function getInitialTab(): Tab {
+  if (Platform.OS !== 'web' || typeof window === 'undefined') {
+    return 'criteria';
+  }
+
+  const screen = new URLSearchParams(window.location.search).get('screen');
+  return screen === 'faq' ? 'faq' : 'criteria';
+}
+
 const theme = {
   primary: '#1E5B8C',
   secondary: '#2BAE9E',
@@ -51,7 +60,7 @@ export default function App() {
 function AppRoot() {
   const insets = useSafeAreaInsets();
   const [fontsLoaded] = useFonts(customFontAssets);
-  const [tab, setTab] = React.useState<Tab>('criteria');
+  const [tab, setTab] = React.useState<Tab>(() => getInitialTab());
 
   if (!fontsLoaded) return null;
 
