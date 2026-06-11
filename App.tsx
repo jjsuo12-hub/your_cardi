@@ -5,17 +5,20 @@ import {
   LayoutAnimation,
   Platform,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
+  StatusBar,
+  StyleProp,
   Text,
   TextInput,
   UIManager,
   View,
+  ViewStyle,
 } from 'react-native';
 import Svg, { Circle, Line, Path, Polyline, Rect, Text as SvgText } from 'react-native-svg';
 import { useFonts } from 'expo-font';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { SafeAreaProvider, initialWindowMetrics, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { DemoAnomalyToggle } from './components/DemoAnomalyToggle';
 import { PatientVitalsScreen } from './screens/PatientVitalsScreen';
@@ -103,6 +106,9 @@ const theme = {
   secondarySoft: '#E9F8F6',
   warningSoft: '#FFF6E5',
 };
+
+const TAB_BAR_BASE_HEIGHT = 72;
+const CONTENT_MAX_WIDTH = 720;
 
 const temporaryNotice =
   '본 체크리스트와 매뉴얼 내용은 현재 임시안입니다. 실제 임상 적용 전 병동 프로토콜, 제조사 지침, 의료진 검토를 통해 수정·확정되어야 합니다.';
@@ -202,7 +208,16 @@ const bootstrapVitals = getDemoVitalsSnapshotMap();
 const bootstrapSelectedPatientId = bootstrapPatients[0]?.id ?? '';
 
 export default function App() {
+  return (
+    <SafeAreaProvider initialMetrics={initialWindowMetrics}>
+      <AppRoot />
+    </SafeAreaProvider>
+  );
+}
+
+function AppRoot() {
   const contentScrollRef = React.useRef<ScrollView>(null);
+  const insets = useSafeAreaInsets();
   const [fontsLoaded] = useFonts(customFontAssets);
   const [tab, setTab] = useState<Tab>('patients');
   const [patients, setPatients] = useState<Patient[]>(bootstrapPatients);
@@ -681,14 +696,38 @@ export default function App() {
 
   if (!fontsLoaded) return null;
 
+  const bottomInset = Math.max(insets.bottom, 12);
+  const tabBarHeight = TAB_BAR_BASE_HEIGHT + bottomInset;
+  const headerStyle = [
+    styles.header,
+    {
+      paddingTop: insets.top + 12,
+      minHeight: 76 + insets.top,
+    },
+  ];
+  const contentContainerStyle = [
+    styles.content,
+    {
+      paddingBottom: tabBarHeight + 32,
+    },
+  ];
+  const tabBarStyle = [
+    styles.tabBar,
+    {
+      height: tabBarHeight,
+      paddingBottom: bottomInset,
+    },
+  ];
+
   return (
-    <SafeAreaView style={styles.safe}>
+    <View style={styles.safe}>
+      <StatusBar barStyle="light-content" backgroundColor={theme.primary} />
       <View style={styles.appShell}>
-        <View style={styles.header}>
+        <View style={headerStyle}>
           <Text style={styles.headerTitle}>YOUR_Cardi:</Text>
           <Text style={styles.headerSubtitle}>HiCardi 적용 판단과 모니터링 보조 병동 간호 지원 어플리케이션</Text>
         </View>
-        <ScrollView ref={contentScrollRef} contentContainerStyle={styles.content}>
+        <ScrollView ref={contentScrollRef} contentContainerStyle={contentContainerStyle}>
           {tab === 'criteria' && (
             <CriteriaScreen
               patientSearchNumber={patientSearchNumber}
@@ -745,9 +784,9 @@ export default function App() {
           )}
           {tab === 'qa' && <QaScreen search={qaSearch} setSearch={setQaSearch} />}
         </ScrollView>
-        <BottomTabs active={tab} setActive={setTab} />
+        <BottomTabs active={tab} setActive={setTab} tabBarStyle={tabBarStyle} />
       </View>
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -1638,7 +1677,15 @@ function TabIcon({ tab, active }: { tab: Tab; active: boolean }) {
   );
 }
 
-function BottomTabs({ active, setActive }: { active: Tab; setActive: (tab: Tab) => void }) {
+function BottomTabs({
+  active,
+  setActive,
+  tabBarStyle,
+}: {
+  active: Tab;
+  setActive: (tab: Tab) => void;
+  tabBarStyle: StyleProp<ViewStyle>;
+}) {
   const tabs: { id: Tab; label: string }[] = [
     { id: 'criteria', label: '적용 평가' },
     { id: 'patients', label: '환자 현황' },
@@ -1646,7 +1693,7 @@ function BottomTabs({ active, setActive }: { active: Tab; setActive: (tab: Tab) 
     { id: 'qa', label: 'FAQ' },
   ];
   return (
-    <View style={styles.tabBar}>
+    <View style={tabBarStyle}>
       {tabs.map((item) => (
         <Pressable key={item.id} style={[styles.tabButton, active === item.id && styles.tabButtonActive]} onPress={() => setActive(item.id)}>
           <View style={styles.tabInner}>
@@ -2413,10 +2460,9 @@ const styles = StyleSheet.create({
     backgroundColor: theme.background,
   },
   header: {
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 8,
-    minHeight: 54,
+    paddingHorizontal: 20,
+    paddingBottom: 16,
+    minHeight: 76,
     justifyContent: 'center',
     backgroundColor: theme.primary,
   },
@@ -2441,8 +2487,11 @@ const styles = StyleSheet.create({
     ...webTextWrapStyle,
   },
   content: {
-    padding: 16,
-    paddingBottom: 96,
+    width: '100%',
+    maxWidth: CONTENT_MAX_WIDTH,
+    alignSelf: 'center',
+    paddingHorizontal: 20,
+    paddingTop: 20,
   },
   screen: {
     gap: 12,
@@ -4545,13 +4594,13 @@ const styles = StyleSheet.create({
     bottom: 0,
     flexDirection: 'row',
     gap: 6,
-    paddingHorizontal: 8,
+    paddingHorizontal: 16,
     paddingTop: 8,
-    paddingBottom: 10,
+    paddingBottom: 12,
     backgroundColor: theme.card,
     borderTopWidth: 1,
     borderTopColor: theme.border,
-    minHeight: 72,
+    minHeight: TAB_BAR_BASE_HEIGHT,
   },
   tabButton: {
     flex: 1,
