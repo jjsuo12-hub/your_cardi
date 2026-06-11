@@ -5,9 +5,10 @@ type Props = {
   title: string;
   summary?: string;
   children: React.ReactNode;
+  closeOnBodyPress?: boolean;
 };
 
-export function AccordionCard({ title, summary, children }: Props) {
+export function AccordionCard({ title, summary, children, closeOnBodyPress = true }: Props) {
   const [expanded, setExpanded] = React.useState(false);
 
   const toggle = () => {
@@ -22,9 +23,21 @@ export function AccordionCard({ title, summary, children }: Props) {
           <Text style={styles.title}>{title}</Text>
           {summary ? <Text style={styles.summary}>{summary}</Text> : null}
         </View>
-        <Text style={styles.chevron}>{expanded ? '⌃' : '⌄'}</Text>
+        <Text style={styles.chevron}>{expanded ? '˄' : '˅'}</Text>
       </Pressable>
-      {expanded ? <View style={styles.body}>{children}</View> : null}
+      {expanded ? (
+        closeOnBodyPress ? (
+          <Pressable style={styles.body} onPress={toggle}>
+            <View pointerEvents="box-none" style={styles.bodyContent}>
+              {children}
+            </View>
+          </Pressable>
+        ) : (
+          <View style={styles.body}>
+            <View style={styles.bodyContent}>{children}</View>
+          </View>
+        )
+      ) : null}
     </View>
   );
 }
@@ -70,6 +83,8 @@ const styles = StyleSheet.create({
   body: {
     paddingHorizontal: 16,
     paddingBottom: 16,
+  },
+  bodyContent: {
     gap: 12,
   },
 });

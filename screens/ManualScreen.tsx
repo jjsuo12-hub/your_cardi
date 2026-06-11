@@ -1,8 +1,9 @@
 import React from 'react';
-import { Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AccordionCard } from '../components/AccordionCard';
+import { ManualImage } from '../components/ManualImage';
 import { SectionCard } from '../components/SectionCard';
 import { manualContent } from '../data/manualContent';
 import { manualImageAssets } from '../data/manualImageAssets';
@@ -29,6 +30,7 @@ export function ManualScreen() {
 
     return haystack.includes(search.trim().toLowerCase());
   });
+
   const contentContainerStyle = [
     styles.content,
     {
@@ -50,6 +52,8 @@ export function ManualScreen() {
 
       {filteredItems.map((item) => {
         const activeTab = item.tabs?.find((tab) => tab.id === (activeTabs[item.id] ?? item.tabs?.[0]?.id)) ?? item.tabs?.[0];
+        const sectionImageSources = item.sections.map((section) => (section.image ? manualImageAssets[section.image] : undefined));
+        const activeTabImageSource = activeTab?.image ? manualImageAssets[activeTab.image] : undefined;
 
         return (
           <AccordionCard key={item.id} title={item.title} summary={item.summary}>
@@ -61,9 +65,7 @@ export function ManualScreen() {
                     {line}
                   </Text>
                 ))}
-                {section.image && manualImageAssets[section.image] ? (
-                  <Image source={manualImageAssets[section.image]} style={styles.manualImage} resizeMode="contain" />
-                ) : null}
+                {section.image && sectionImageSources[index] ? <ManualImage imageKey={section.image} source={sectionImageSources[index]} /> : null}
                 {section.warning ? <Text style={styles.warningText}>주의: {section.warning}</Text> : null}
               </View>
             ))}
@@ -89,9 +91,7 @@ export function ManualScreen() {
                     {line}
                   </Text>
                 ))}
-                {activeTab.image && manualImageAssets[activeTab.image] ? (
-                  <Image source={manualImageAssets[activeTab.image]} style={styles.manualImage} resizeMode="contain" />
-                ) : null}
+                {activeTab.image && activeTabImageSource ? <ManualImage imageKey={activeTab.image} source={activeTabImageSource} /> : null}
                 {activeTab.warning ? <Text style={styles.warningText}>안내: {activeTab.warning}</Text> : null}
               </View>
             ) : null}
@@ -167,13 +167,5 @@ const styles = StyleSheet.create({
   },
   tabButtonTextActive: {
     color: '#FFFFFF',
-  },
-  manualImage: {
-    width: '100%',
-    minHeight: 180,
-    maxHeight: 300,
-    borderRadius: 12,
-    backgroundColor: '#F4F8FA',
-    alignSelf: 'center',
   },
 });

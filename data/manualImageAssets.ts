@@ -20,3 +20,14 @@ export const manualImageAssets: Partial<Record<ManualImageKey, ImageSourcePropTy
   'step4-live-studio': require('../assets/manual/step4-live-studio.png'),
   'step5-pc-unmapping': require('../assets/manual/step5-pc-unmapping.png'),
 };
+
+export const manualImageAspectRatios: Record<ManualImageKey, number> = {
+  'step1-components': 4 / 3,
+  'step2-pc': 16 / 10,
+  'step2-pda': 9 / 16,
+  'step3-placement': 4 / 3,
+  'step4-web-monitoring': 16 / 10,
+  'step4-live-studio': 16 / 10,
+  'step5-pc-unmapping': 16 / 10,
+  'step5-pda-unmapping': 9 / 16,
+};
