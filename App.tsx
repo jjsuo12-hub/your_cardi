@@ -1182,16 +1182,9 @@ function PatientsScreen({
                     <DetailTabButton label="적용 기록" active={activePatientDetailTab === 'record'} onPress={() => toggleDetailTab('record')} />
                   </Pressable>
                   {activePatientDetailTab ? (
-                    <Pressable
-                      style={styles.detailFlatSection}
-                      onPress={(event) => {
-                        event.stopPropagation?.();
-                        toggleDetailTab(activePatientDetailTab);
-                      }}
-                    >
+                    <View style={styles.detailFlatSection}>
                       <View style={styles.detailFlatHeader}>
                         <Text style={styles.detailFlatTitle}>{getPatientDetailTabLabel(activePatientDetailTab)}</Text>
-                        <Text style={styles.detailFlatHint}>다시 터치하여 접기</Text>
                       </View>
                       <Pressable style={styles.detailFlatBody} onPress={(event) => event.stopPropagation?.()}>
                         {activePatientDetailTab === 'ecg' ? (
@@ -1215,7 +1208,16 @@ function PatientsScreen({
                           </View>
                         ) : null}
                       </Pressable>
-                    </Pressable>
+                      <Pressable
+                        style={styles.detailFlatFooterButton}
+                        onPress={(event) => {
+                          event.stopPropagation?.();
+                          toggleDetailTab(activePatientDetailTab);
+                        }}
+                      >
+                        <Text style={styles.detailFlatHint}>다시 터치하여 접기</Text>
+                      </Pressable>
+                    </View>
                   ) : null}
                 </Pressable>
               )}
@@ -3826,6 +3828,11 @@ const styles = StyleSheet.create({
   },
   detailFlatBody: {
     gap: 10,
+  },
+  detailFlatFooterButton: {
+    alignSelf: 'center',
+    paddingTop: 2,
+    paddingBottom: 4,
   },
   recordFlatList: {
     gap: 8,

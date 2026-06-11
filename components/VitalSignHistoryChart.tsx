@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Platform, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import Svg, { Circle, Line, Path, Polyline, Rect, Text as SvgText } from 'react-native-svg';
 
 import { VitalDataSource, VitalMetricType, generateDummyVitalHistory } from '../utils/generateDummyVitalHistory';
@@ -17,8 +17,10 @@ type SelectedPoint = {
 
 type VitalSignHistoryChartProps = {
   activeMetric: VitalMetricType | null;
+  collapsed: boolean;
   dataSource?: VitalDataSource;
   metricType: VitalMetricType;
+  onToggleCollapse: () => void;
   setActiveMetric: (metricType: VitalMetricType | null) => void;
 };
 
@@ -82,12 +84,12 @@ const configs = {
   skinTemp: {
     title: 'Skin Temperature History',
     yLabel: 'Skin Temp',
-    unit: '℃',
+    unit: '°C',
     min: 32,
     max: 39,
     ticks: [32, 33, 34, 35, 36, 37, 38, 39],
     color: '#D64545',
-    footer: 'Skin temperature demo range: 35.6-37.8℃',
+    footer: 'Skin temperature demo range: 35.6-37.8°C',
     status: 'Watch demo',
     statusColor: '#F5A623',
   },
@@ -95,8 +97,10 @@ const configs = {
 
 export function VitalSignHistoryChart({
   activeMetric,
+  collapsed,
   dataSource = 'dummy',
   metricType,
+  onToggleCollapse,
   setActiveMetric,
 }: VitalSignHistoryChartProps) {
   const [selectedPoint, setSelectedPoint] = useState<SelectedPoint | null>(null);
@@ -106,8 +110,18 @@ export function VitalSignHistoryChart({
   const polyline = points.map((point, index) => `${mapX(index)},${mapY(point.value, config.min, config.max)}`).join(' ');
   const visibleTooltip = activeMetric === metricType ? selectedPoint : null;
 
+  const clearSelection = () => {
+    setSelectedPoint(null);
+    setActiveMetric(null);
+  };
+
   const selectPoint = (index: number) => {
     const point = points[index];
+    if (visibleTooltip?.index === index) {
+      clearSelection();
+      return;
+    }
+
     setActiveMetric(metricType);
     setSelectedPoint({
       index,
@@ -123,99 +137,116 @@ export function VitalSignHistoryChart({
 
   return (
     <View style={styles.card}>
-      <View style={styles.headerRow}>
-        <View>
+      <Pressable
+        style={styles.headerRow}
+        onPress={() => {
+          if (!collapsed && activeMetric === metricType) {
+            clearSelection();
+          }
+          onToggleCollapse();
+        }}
+      >
+        <View style={styles.headerTextBlock}>
           <Text style={styles.title}>{config.title}</Text>
           <Text style={styles.subtitle}>
-            {config.yLabel} · 10분 간격 · 최근 2시간 · {dataSource === 'dummy' ? '데모 데이터' : '연동 데이터'}
+            {config.yLabel} · 10분 간격 · 최근 2시간 · {dataSource === 'dummy' ? '더미 데이터' : '연동 데이터'}
           </Text>
         </View>
-        <View style={[styles.statusBadge, { backgroundColor: config.statusColor }]}>
-          <Text style={styles.statusBadgeText}>{config.status}</Text>
+        <View style={styles.headerBadgeGroup}>
+          <View style={[styles.statusBadge, { backgroundColor: config.statusColor }]}>
+            <Text style={styles.statusBadgeText}>{config.status}</Text>
+          </View>
+          <Text style={styles.collapseHint}>{collapsed ? '탭하여 펼치기' : '다시 탭하여 접기'}</Text>
         </View>
-      </View>
+      </Pressable>
 
-      <View style={styles.currentRow}>
-        <Text style={styles.currentLabel}>{config.yLabel}</Text>
-        <Text style={styles.currentValue}>
-          {formatValue(currentValue, metricType)} <Text style={styles.currentUnit}>{config.unit}</Text>
-        </Text>
-      </View>
+      {!collapsed ? (
+        <>
+          <View style={styles.currentRow}>
+            <Text style={styles.currentLabel}>{config.yLabel}</Text>
+            <Text style={styles.currentValue}>
+              {formatValue(currentValue, metricType)} <Text style={styles.currentUnit}>{config.unit}</Text>
+            </Text>
+          </View>
 
-      <View style={styles.chartWrap}>
-        <Svg width="100%" height={height} viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
-          <Rect x="0" y="0" width={width} height={height} fill="#FFFFFF" onPress={() => setActiveMetric(null)} />
-          {config.ticks.map((tick) => {
-            const y = mapY(tick, config.min, config.max);
-            return (
-              <React.Fragment key={`y-${tick}`}>
-                <Line x1={plotLeft} y1={y} x2={plotRight} y2={y} stroke="#EEF2F4" strokeWidth="1" />
-                <SvgText x="5" y={y + 4} fill="#6B7280" fontSize="9" fontWeight="700">
-                  {tick}
-                </SvgText>
-              </React.Fragment>
-            );
-          })}
-          {points.map((point, index) => {
-            const x = mapX(index);
-            const showLabel = index % 2 === 0 || index === points.length - 1;
-            return (
-              <React.Fragment key={`x-${point.minutesAgo}`}>
-                <Line x1={x} y1={plotTop} x2={x} y2={plotBottom} stroke="#F2F5F7" strokeWidth="1" />
-                {showLabel && (
-                  <SvgText x={x - 13} y="204" fill="#6B7280" fontSize="9" fontWeight="700">
-                    {point.minutesAgo === 0 ? '현재' : `-${point.minutesAgo}`}
-                  </SvgText>
-                )}
-              </React.Fragment>
-            );
-          })}
-          <SvgText x="176" y="220" fill="#6B7280" fontSize="10" fontWeight="800">
-            minute
-          </SvgText>
-          <Polyline points={polyline} stroke={config.color} strokeWidth="2.4" fill="none" strokeLinecap="round" strokeLinejoin="round" />
-          {points.map((point, index) => {
-            const cx = mapX(index);
-            const cy = mapY(point.value, config.min, config.max);
-            const selected = visibleTooltip?.index === index;
-            const eventProps = {
-              onMouseEnter: () => selectPoint(index),
-              onMouseLeave: () => undefined,
-            } as Record<string, unknown>;
-            return (
-              <React.Fragment key={`point-${index}`}>
-                {selected && <Circle cx={cx} cy={cy} r="10" fill={config.color} opacity="0.16" />}
-                <Circle
-                  cx={cx}
-                  cy={cy}
-                  r={selected ? 5 : index === points.length - 1 ? 4 : 3}
-                  fill={config.color}
-                  stroke="#FFFFFF"
-                  strokeWidth="1.8"
-                />
-                <Circle cx={cx} cy={cy} r="12" fill="transparent" onPress={() => selectPoint(index)} {...eventProps} />
-              </React.Fragment>
-            );
-          })}
-          {visibleTooltip && <SvgTooltip point={visibleTooltip} color={config.color} label={config.yLabel} />}
-        </Svg>
-      </View>
+          <View style={styles.chartWrap}>
+            <Svg width="100%" height={height} viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
+              <Rect x="0" y="0" width={width} height={height} fill="#FFFFFF" onPress={clearSelection} />
+              {config.ticks.map((tick) => {
+                const y = mapY(tick, config.min, config.max);
+                return (
+                  <React.Fragment key={`y-${tick}`}>
+                    <Line x1={plotLeft} y1={y} x2={plotRight} y2={y} stroke="#EEF2F4" strokeWidth="1" />
+                    <SvgText x="5" y={y + 4} fill="#6B7280" fontSize="9" fontWeight="700">
+                      {tick}
+                    </SvgText>
+                  </React.Fragment>
+                );
+              })}
+              {points.map((point, index) => {
+                const x = mapX(index);
+                const showLabel = index % 2 === 0 || index === points.length - 1;
+                return (
+                  <React.Fragment key={`x-${point.minutesAgo}`}>
+                    <Line x1={x} y1={plotTop} x2={x} y2={plotBottom} stroke="#F2F5F7" strokeWidth="1" />
+                    {showLabel && (
+                      <SvgText x={x - 13} y="204" fill="#6B7280" fontSize="9" fontWeight="700">
+                        {point.minutesAgo === 0 ? '현재' : `-${point.minutesAgo}`}
+                      </SvgText>
+                    )}
+                  </React.Fragment>
+                );
+              })}
+              <SvgText x="176" y="220" fill="#6B7280" fontSize="10" fontWeight="800">
+                minute
+              </SvgText>
+              <Polyline points={polyline} stroke={config.color} strokeWidth="2.4" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+              {points.map((point, index) => {
+                const cx = mapX(index);
+                const cy = mapY(point.value, config.min, config.max);
+                const selected = visibleTooltip?.index === index;
+                const eventProps = Platform.OS === 'web'
+                  ? {
+                      onMouseEnter: () => selectPoint(index),
+                    }
+                  : {};
 
-      {visibleTooltip && (
-        <View style={styles.tooltipCard}>
-          <Text style={styles.tooltipTitle}>선택 기록</Text>
-          <Text style={styles.tooltipText}>
-            {configs[visibleTooltip.metricType].yLabel} · {visibleTooltip.minutesAgo === 0 ? '현재' : `${visibleTooltip.minutesAgo}분 전`} ·{' '}
-            {visibleTooltip.time}
-          </Text>
-          <Text style={[styles.tooltipValue, { color: config.color }]}>
-            {formatValue(visibleTooltip.value, metricType)} {visibleTooltip.unit}
-          </Text>
-        </View>
-      )}
+                return (
+                  <React.Fragment key={`point-${index}`}>
+                    {selected ? <Circle cx={cx} cy={cy} r="10" fill={config.color} opacity="0.16" /> : null}
+                    <Circle
+                      cx={cx}
+                      cy={cy}
+                      r={selected ? 5 : index === points.length - 1 ? 4 : 3}
+                      fill={config.color}
+                      stroke="#FFFFFF"
+                      strokeWidth="1.8"
+                    />
+                    <Circle cx={cx} cy={cy} r="12" fill="transparent" onPress={() => selectPoint(index)} {...eventProps} />
+                  </React.Fragment>
+                );
+              })}
+              {visibleTooltip ? <SvgTooltip point={visibleTooltip} color={config.color} label={config.yLabel} /> : null}
+            </Svg>
+          </View>
 
-      <Text style={styles.footer}>{config.footer}</Text>
-      <Text style={styles.disclaimer}>상태 배지는 데모 표시이며 실제 임상판단, 진단, 처방에 사용할 수 없습니다.</Text>
+          {visibleTooltip ? (
+            <View pointerEvents="none" style={styles.tooltipCard}>
+              <Text style={styles.tooltipTitle}>선택 기록</Text>
+              <Text style={styles.tooltipText}>
+                {configs[visibleTooltip.metricType].yLabel} · {visibleTooltip.minutesAgo === 0 ? '현재' : `${visibleTooltip.minutesAgo}분 전`} ·{' '}
+                {visibleTooltip.time}
+              </Text>
+              <Text style={[styles.tooltipValue, { color: config.color }]}>
+                {formatValue(visibleTooltip.value, metricType)} {visibleTooltip.unit}
+              </Text>
+            </View>
+          ) : null}
+
+          <Text style={styles.footer}>{config.footer}</Text>
+          <Text style={styles.disclaimer}>상태 배지는 데모 표시이며 실제 임상판단, 진단, 처방에 사용할 수 없습니다.</Text>
+        </>
+      ) : null}
     </View>
   );
 }
@@ -238,8 +269,8 @@ function SvgTooltip({ color, label, point }: { color: string; label: string; poi
 
   return (
     <React.Fragment>
-      <Rect x={x} y={y} width={tooltipWidth} height={tooltipHeight} rx="8" fill="#1F2933" />
-      <Path d={tailPath} fill="#1F2933" />
+      <Rect x={x} y={y} width={tooltipWidth} height={tooltipHeight} rx="8" fill="#1F2933" pointerEvents="none" />
+      <Path d={tailPath} fill="#1F2933" pointerEvents="none" />
       <SvgText
         x={x + tooltipPaddingHorizontal}
         y={y + tooltipPaddingVertical + 11}
@@ -248,6 +279,7 @@ function SvgTooltip({ color, label, point }: { color: string; label: string; poi
         fontSize={tooltipFontSize}
         fontWeight="800"
         letterSpacing="0"
+        pointerEvents="none"
       >
         {valueLine}
       </SvgText>
@@ -259,10 +291,11 @@ function SvgTooltip({ color, label, point }: { color: string; label: string; poi
         fontSize={tooltipFontSize}
         fontWeight="700"
         letterSpacing="0"
+        pointerEvents="none"
       >
         {timeLine}
       </SvgText>
-      <Circle cx={point.x} cy={point.y} r="3.2" fill={color} stroke="#FFFFFF" strokeWidth="1.4" />
+      <Circle cx={point.x} cy={point.y} r="3.2" fill={color} stroke="#FFFFFF" strokeWidth="1.4" pointerEvents="none" />
     </React.Fragment>
   );
 }
@@ -300,6 +333,13 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     gap: 10,
   },
+  headerTextBlock: {
+    flex: 1,
+  },
+  headerBadgeGroup: {
+    alignItems: 'flex-end',
+    gap: 6,
+  },
   title: {
     color: '#1F2933',
     fontSize: 17,
@@ -320,6 +360,11 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 11,
     fontWeight: '900',
+  },
+  collapseHint: {
+    color: '#6B7280',
+    fontSize: 11,
+    fontWeight: '700',
   },
   currentRow: {
     borderRadius: 8,

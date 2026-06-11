@@ -6,9 +6,18 @@
     "orientation": "portrait",
     "icon": "./assets/icons/appstore.png",
     "platforms": ["ios", "android", "web"],
+    "android": {
+      "package": "com.jjsuo12.yourcadi.main"
+    },
     "web": {
       "bundler": "metro",
       "favicon": "./assets/icons/appstore.png"
-    }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "29a1f894-bc30-4e73-a6cf-7f860456cd3c"
+      }
+    },
+    "owner": "spidey38"
   }
 }

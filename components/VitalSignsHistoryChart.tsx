@@ -6,6 +6,25 @@ import { VitalSignHistoryChart } from './VitalSignHistoryChart';
 
 export function VitalSignsHistoryChart() {
   const [activeMetric, setActiveMetric] = useState<VitalMetricType | null>(null);
+  const [collapsedMetrics, setCollapsedMetrics] = useState<Record<VitalMetricType, boolean>>({
+    hr: false,
+    spo2: false,
+    rr: false,
+    skinTemp: false,
+  });
+
+  const toggleMetricCard = (metric: VitalMetricType) => {
+    setCollapsedMetrics((current) => {
+      const nextCollapsed = !current[metric];
+      if (nextCollapsed && activeMetric === metric) {
+        setActiveMetric(null);
+      }
+      return {
+        ...current,
+        [metric]: nextCollapsed,
+      };
+    });
+  };
 
   return (
     <View style={styles.section}>
@@ -17,10 +36,38 @@ export function VitalSignsHistoryChart() {
       </View>
       <Text style={styles.notice}>시연용 더미 생체정보입니다. 실제 환자 데이터가 아닙니다.</Text>
       <Text style={styles.caption}>10분 간격으로 생성된 시연용 생체정보입니다. 실제 환자 데이터가 아닙니다.</Text>
-      <VitalSignHistoryChart activeMetric={activeMetric} metricType="hr" setActiveMetric={setActiveMetric} dataSource="dummy" />
-      <VitalSignHistoryChart activeMetric={activeMetric} metricType="spo2" setActiveMetric={setActiveMetric} dataSource="dummy" />
-      <VitalSignHistoryChart activeMetric={activeMetric} metricType="rr" setActiveMetric={setActiveMetric} dataSource="dummy" />
-      <VitalSignHistoryChart activeMetric={activeMetric} metricType="skinTemp" setActiveMetric={setActiveMetric} dataSource="dummy" />
+      <VitalSignHistoryChart
+        activeMetric={activeMetric}
+        collapsed={collapsedMetrics.hr}
+        metricType="hr"
+        onToggleCollapse={() => toggleMetricCard('hr')}
+        setActiveMetric={setActiveMetric}
+        dataSource="dummy"
+      />
+      <VitalSignHistoryChart
+        activeMetric={activeMetric}
+        collapsed={collapsedMetrics.spo2}
+        metricType="spo2"
+        onToggleCollapse={() => toggleMetricCard('spo2')}
+        setActiveMetric={setActiveMetric}
+        dataSource="dummy"
+      />
+      <VitalSignHistoryChart
+        activeMetric={activeMetric}
+        collapsed={collapsedMetrics.rr}
+        metricType="rr"
+        onToggleCollapse={() => toggleMetricCard('rr')}
+        setActiveMetric={setActiveMetric}
+        dataSource="dummy"
+      />
+      <VitalSignHistoryChart
+        activeMetric={activeMetric}
+        collapsed={collapsedMetrics.skinTemp}
+        metricType="skinTemp"
+        onToggleCollapse={() => toggleMetricCard('skinTemp')}
+        setActiveMetric={setActiveMetric}
+        dataSource="dummy"
+      />
     </View>
   );
 }
