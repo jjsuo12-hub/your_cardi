@@ -28,7 +28,7 @@ export function mapAssessmentToHicardiMonitoringOrder(
     encounterId: assessment.encounterId,
     targetStatus: assessment.status,
     requestedAt: assessment.assessedAt,
-    note: assessment.applicationReason ?? '시연용 평가 기록에서 생성된 매핑 요청입니다.',
+    note: assessment.applicationReason ?? '시연용 평가 기록에서 생성된 의료진 상의용 매핑 요청입니다.',
     source: 'demo',
   };
 }

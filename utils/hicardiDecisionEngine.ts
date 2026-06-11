@@ -12,11 +12,11 @@ export function evaluateHicardiDecision(
   if (emergency) {
     return {
       decision: 'emergencyApply',
-      finalLabel: '응급상황 예외 적용',
-      description: '프로토타입 안내: 기존 적용 기준과 관계없이 즉시 HiCardi 적용 가능 흐름을 시연합니다.',
+      finalLabel: '즉시 의료진 상의 필요',
+      description: '응급상황 발생 시 NEWS2 점수와 관계없이 환자 상태를 즉시 확인하고 담당 의료진과 상의합니다.',
       reportRequired: true,
       recommendedStatus: 'candidate',
-      nextReassessmentLabel: '응급상황 종료 후 즉시 재평가',
+      nextReassessmentLabel: '응급상황 발생 시: 환자 상태를 즉시 확인하고 담당 의료진과 상의합니다.',
     };
   }
 
@@ -25,11 +25,11 @@ export function evaluateHicardiDecision(
   if (news2Result.totalScore >= 7) {
     return {
       decision: 'startHicardi',
-      finalLabel: 'HiCardi 적용 시작',
-      description: '담당 진료과 보고 후 HiCardi 적용 권장 흐름입니다.',
+      finalLabel: 'HiCardi 적용 상의 필요',
+      description: 'NEWS2 7점 이상으로 환자 상태 악화 가능성이 높으므로, 담당 의료진과 HiCardi 적용 여부를 상의합니다.',
       reportRequired: true,
       recommendedStatus: 'candidate',
-      nextReassessmentLabel: '매일 NEWS2 측정 및 환자 상태 재평가',
+      nextReassessmentLabel: 'NEWS2 ≥ 7점: 매일 재평가 후 담당 의료진과 적용 유지 여부를 상의합니다.',
     };
   }
 
@@ -37,20 +37,20 @@ export function evaluateHicardiDecision(
     if (specialCriteriaCount >= 1) {
       return {
         decision: 'recommendHicardi',
-        finalLabel: 'HiCardi 적용 권고',
-        description: '매칭 진료과 보고 후 HiCardi 적용 결정을 보조합니다.',
+        finalLabel: 'HiCardi 적용 상의 권고',
+        description: 'NEWS2 5-6점이며 병동 특수 적용 기준에 해당하므로, 상급자 및 담당 의료진과 HiCardi 적용 여부를 상의합니다.',
         reportRequired: true,
         recommendedStatus: 'candidate',
-        nextReassessmentLabel: 'POD 2, POD 7, POD 14 재평가',
+        nextReassessmentLabel: 'NEWS2 5-6점: 지정된 시점에 재평가하고 담당 의료진과 적용 유지 여부를 상의합니다.',
       };
     }
     return {
       decision: 'routineObservation',
       finalLabel: '일반 관찰 유지',
-      description: '정기적 NEWS2 측정 및 환자 상태 모니터링을 유지합니다.',
+      description: '정기적 NEWS2 측정과 환자 상태 관찰을 유지하며, 상태 변화가 있으면 담당 의료진과 상의합니다.',
       reportRequired: false,
       recommendedStatus: 'maintained',
-      nextReassessmentLabel: '정기적 NEWS2 측정 및 상태 모니터링',
+      nextReassessmentLabel: 'NEWS2 5-6점: 지정된 시점에 재평가하고 담당 의료진과 적용 유지 여부를 상의합니다.',
     };
   }
 
@@ -58,29 +58,29 @@ export function evaluateHicardiDecision(
     if (specialCriteriaCount >= 2) {
       return {
         decision: 'consultSenior',
-        finalLabel: '상급자와 협의',
-        description: 'HiCardi 적용 여부를 상급자와 협의하는 흐름입니다.',
+        finalLabel: '의료진 상의 필요',
+        description: 'NEWS2는 낮지만 병동 특수 적용 기준이 2개 이상 해당하므로, HiCardi 적용 여부를 상급자 및 담당 의료진과 상의합니다.',
         reportRequired: false,
         recommendedStatus: 'candidate',
-        nextReassessmentLabel: 'POD 2, POD 7, POD 14 재평가',
+        nextReassessmentLabel: 'NEWS2 5-6점: 지정된 시점에 재평가하고 담당 의료진과 적용 유지 여부를 상의합니다.',
       };
     }
     return {
       decision: 'routineObservation',
       finalLabel: '일반 관찰 유지',
-      description: '정기적 NEWS2 측정 및 환자 상태 모니터링을 유지합니다.',
+      description: '정기적 NEWS2 측정과 환자 상태 관찰을 유지합니다. 새로운 이상 소견이 있으면 담당 의료진과 상의합니다.',
       reportRequired: false,
       recommendedStatus: 'maintained',
-      nextReassessmentLabel: '정기적 NEWS2 측정 및 상태 모니터링',
+      nextReassessmentLabel: 'NEWS2 5-6점: 지정된 시점에 재평가하고 담당 의료진과 적용 유지 여부를 상의합니다.',
     };
   }
 
   return {
     decision: 'considerStop',
-    finalLabel: 'HiCardi 중단 고려',
-    description: 'NEWS2 4점 미만 유지 시 HiCardi 적용 중단 고려 흐름입니다.',
+    finalLabel: 'HiCardi 중단 여부 상의',
+    description: 'HiCardi 적용 중인 환자에서 NEWS2 4점 미만이 유지되는 경우, 담당 의료진과 적용 중단 여부를 상의합니다.',
     reportRequired: false,
     recommendedStatus: 'ended',
-    nextReassessmentLabel: 'NEWS2 4점 미만 유지 시 중단 고려',
+    nextReassessmentLabel: 'NEWS2 4점 미만 유지: 담당 의료진과 HiCardi 적용 중단 여부를 상의합니다.',
   };
 }

@@ -957,8 +957,8 @@ function CriteriaScreen({
                 })}
               </View>
               <Pressable style={[styles.inlineNoticeCard, emergencyApply && styles.inlineNoticeCardDanger]} onPress={() => setEmergencyApply((current) => !current)}>
-                <Text style={styles.cardTitle}>응급상황 예외 적용</Text>
-                <Text style={styles.cardText}>프로토타입 안내용 예외 흐름입니다. 실제 임상 결정을 대체하지 않습니다.</Text>
+                <Text style={styles.cardTitle}>응급상황 시 의료진 상의</Text>
+                <Text style={styles.cardText}>응급상황 발생 시 환자 상태를 즉시 확인하고 담당 의료진과 상의하는 시연용 흐름입니다.</Text>
               </Pressable>
             </SectionCard>
           </SectionCard>
@@ -969,7 +969,7 @@ function CriteriaScreen({
               <Text style={styles.resultHeroPatient}>{assessmentPatient.patient.displayName}</Text>
               <Text style={styles.cardText}>{assessmentDecision.description}</Text>
               <Text style={styles.resultHeroMeta}>다음 재평가: {nextReassessmentLabel}</Text>
-              {isDirectStart ? <Text style={styles.resultHeroCallout}>NEWS2 7점 이상으로 즉시 적용 시작 흐름이 표시됩니다.</Text> : null}
+              {isDirectStart ? <Text style={styles.resultHeroCallout}>NEWS2 7점 이상으로 담당 의료진과 HiCardi 적용 여부를 즉시 상의하는 흐름이 표시됩니다.</Text> : null}
             </View>
 
             <AccordionCard title="세부 판단 근거 보기" badge="임시 기준">
@@ -985,13 +985,13 @@ function CriteriaScreen({
             <AccordionCard title="재평가·중단 기준 보기">
               <View style={styles.keyValueList}>
                 <KeyValue label="다음 재평가" value={assessmentDecision.nextReassessmentLabel} />
-                <KeyValue label="중단/협의" value={getAssessmentDecisionLabel(assessmentDecision.decision)} />
+                <KeyValue label="적용·중단 상의" value={getAssessmentDecisionLabel(assessmentDecision.decision)} />
               </View>
             </AccordionCard>
 
             <View style={styles.actionGrid}>
               <Pressable style={styles.secondaryButton} onPress={saveAsCandidate}>
-                <Text style={styles.secondaryButtonText}>적용 후보로 저장</Text>
+                <Text style={styles.secondaryButtonText}>적용 상의 대상으로 저장</Text>
               </Pressable>
               <Pressable style={styles.secondaryButton} onPress={saveAssessmentOnly}>
                 <Text style={styles.secondaryButtonText}>평가 기록 저장</Text>
@@ -1209,7 +1209,7 @@ function PatientsScreen({
                           <View style={styles.recordFlatList}>
                             <KeyValue label="환자번호" value={patient.patientNumber ?? patient.id} />
                             <KeyValue label="적용 상태" value={getHicardiStatusLabel(patient.hicardiStatus)} />
-                            <KeyValue label="적용 시작" value={patient.hicardiStartTime ?? '-'} />
+                            <KeyValue label="의료진 상의 후 적용 시점" value={patient.hicardiStartTime ?? '-'} />
                             <KeyValue label="적용 사유" value={patient.applicationReason || '시연용 등록'} />
                             <KeyValue label="최근 알람" value={patient.latestAlert || '-'} />
                           </View>
@@ -1463,7 +1463,7 @@ function ManualOverviewStepper() {
     'Step 2. 환자·의료기기·수신기 매핑',
     'Step 3. 환자에게 의료기기 적용',
     'Step 4. 생체정보 실시간 관찰',
-    'Step 5. 매핑 해제 및 모니터링 종료',
+    'Step 5. 의료진 상의 후 매핑 해제 및 모니터링 종료',
   ];
 
   return (
@@ -2102,22 +2102,22 @@ function Segmented({
 function getDecision(totalScore: number) {
   if (totalScore >= 6) {
     return {
-      title: '적용 권장',
+      title: '적용 상의 필요',
       color: theme.danger,
-      reason: '6점 이상은 시연용 임시 기준에서 HiCardi 적용 권장 범위입니다. 실제 적용 여부는 의료진 판단과 병동 프로토콜을 따릅니다.',
+      reason: '6점 이상은 시연용 임시 기준에서 HiCardi 적용 여부를 담당 의료진과 상의할 필요가 있는 범위입니다. 실제 적용 여부는 병동 프로토콜과 의료진 판단에 따릅니다.',
     };
   }
   if (totalScore >= 3) {
     return {
-      title: '적용 고려',
+      title: '적용 여부 상의',
       color: theme.caution,
-      reason: '3-5점은 시연용 임시 기준에서 적용 고려 범위입니다. 단독 의료 판단 기준이 아닙니다.',
+      reason: '3-5점은 시연용 임시 기준에서 적용 여부를 상의하는 참고 범위입니다. 단독 의료 판단 기준이 아닙니다.',
     };
   }
   return {
     title: '일반 관찰',
     color: theme.stable,
-    reason: '0-2점은 시연용 임시 기준에서 일반 관찰 범위입니다. 실제 상태 변화는 별도 확인이 필요합니다.',
+    reason: '0-2점은 시연용 임시 기준에서 일반 관찰 범위입니다. 실제 상태 변화가 있으면 담당 의료진과 상의합니다.',
   };
 }
 
@@ -2138,28 +2138,28 @@ function getPatientCategorySummary(patient: Patient) {
 
 function getHicardiStatusLabel(status: Patient['hicardiStatus']) {
   if (status === 'applied') return '적용 중';
-  if (status === 'candidate') return '적용 후보';
-  if (status === 'ended') return '적용 종료';
+  if (status === 'candidate') return '적용 상의 대상';
+  if (status === 'ended') return '중단 여부 상의 완료';
   return '미적용';
 }
 
 function getAssessmentStatusLabel(
   status: AppPatient['currentHicardiStatus'] | HicardiAssessmentRecord['status'],
 ) {
-  if (status === 'candidate') return '적용 검토';
-  if (status === 'mappingPending') return '매핑 대기';
+  if (status === 'candidate') return '적용 상의 대상';
+  if (status === 'mappingPending') return '의료진 상의 후 매핑 대기';
   if (status === 'monitoring') return '모니터링 중';
   if (status === 'maintained') return '일반 관찰 유지';
-  if (status === 'ended') return '중단';
+  if (status === 'ended') return '중단 여부 상의';
   return '미적용';
 }
 
 function getAssessmentDecisionLabel(decision: HicardiAssessmentRecord['decision']) {
-  if (decision === 'startHicardi') return 'HiCardi 적용 시작';
-  if (decision === 'recommendHicardi') return 'HiCardi 적용 권고';
-  if (decision === 'consultSenior') return '상급자와 협의';
-  if (decision === 'considerStop') return 'HiCardi 중단 고려';
-  if (decision === 'emergencyApply') return '응급상황 예외 적용';
+  if (decision === 'startHicardi') return 'HiCardi 적용 상의 필요';
+  if (decision === 'recommendHicardi') return 'HiCardi 적용 상의 권고';
+  if (decision === 'consultSenior') return '상급자 및 의료진 상의';
+  if (decision === 'considerStop') return 'HiCardi 중단 여부 상의';
+  if (decision === 'emergencyApply') return '즉시 의료진 상의 필요';
   return '일반 관찰 유지';
 }
 
@@ -2336,7 +2336,7 @@ function buildAssessmentReasonSummary(
   suffix?: string,
 ) {
   const base = `${patient.displayName}(${patient.patientNumber})은/는 NEWS2 ${news2Result.totalScore}점(${getNews2BandLabel(news2Result.band)})이며, 병동 특수 적용 기준은 ${formatSpecialCriteriaSummary(specialCriteria)}입니다. 시연용 평가 결과는 ${finalLabel}입니다.`;
-  const emergency = emergencyApply ? ' 응급상황 예외 적용 흐름이 함께 표시되었습니다.' : '';
+  const emergency = emergencyApply ? ' 응급상황 발생 시 즉시 담당 의료진과 상의하는 흐름이 함께 표시되었습니다.' : '';
   return `${base}${emergency}${suffix ? ` ${suffix}` : ''}`.trim();
 }
 
